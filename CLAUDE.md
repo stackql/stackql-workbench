@@ -201,4 +201,5 @@ Raise these with the maintainer when the work reaches them. Do not decide them a
 - Signing and notarisation identities for the Windows executable and the macOS app bundle.
 - Whether `srv` should later co-host the MCP server so the IDE and the agent share one engine session.
 - Whether loopback pg wire needs TLS with a per-launch client certificate.
-- Licence for this repository. `stackql` itself is MIT licensed.
+
+The licence is decided: MIT, the same as `stackql`.

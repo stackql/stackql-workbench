@@ -238,4 +238,4 @@ Two earlier prototypes informed the layout and the API shape. Neither is used at
 
 ## Licence
 
-To be confirmed. `stackql` itself is MIT licensed.
+MIT, the same as `stackql`. See [LICENSE](LICENSE).
