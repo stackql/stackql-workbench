@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Classic Blue is the brand colour. */
+  --color-brand: #0f4c81;
+  --color-brand-light: #3d74a6;
+  --color-brand-dark: #0a3559;
+
+  --color-surface: #ffffff;
+  --color-surface-alt: #f4f6f8;
+  --color-surface-sunken: #e9edf1;
+  --color-line: #d5dbe1;
+  --color-ink: #1b2430;
+  --color-ink-muted: #5c6875;
+  --color-danger: #b42318;
+  --color-warn: #b54708;
+  --color-ok: #067647;
+
+  --font-sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Cascadia Mono', 'SF Mono', Consolas, Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-brand-light: #6fa3d1;
+    --color-surface: #161b22;
+    --color-surface-alt: #1c232c;
+    --color-surface-sunken: #11161c;
+    --color-line: #303a46;
+    --color-ink: #e3e8ee;
+    --color-ink-muted: #96a2b0;
+    --color-danger: #f97066;
+    --color-warn: #fdb022;
+    --color-ok: #47cd89;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  overflow: hidden;
+  /* The app is a tool, not a document: no accidental text selection in chrome. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Content the operator may want to copy stays selectable. */
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
