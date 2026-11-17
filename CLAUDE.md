@@ -8,13 +8,14 @@ StackQL Workbench is the desktop UI for [StackQL](https://github.com/stackql/sta
 
 ## Status
 
-Pre-alpha, milestone M0 not yet started. Update this line when a milestone lands. The roadmap is in `README.md`.
+Pre-alpha. M0 (foundations) has landed: engine discovery and supervision, the pg wire query service, the explorer, one editor buffer and the results grid, on Windows. The macOS code paths compile and the process supervision is tested on Linux, but nothing has been run on macOS yet. Update this line when a milestone lands. The roadmap is in `README.md`.
 
 ## Architecture rules
 
 These rules are fixed. If one cannot be met, stop and ask instead of working around it.
 
 - The webview is not served over HTTP and opens no network listener. It loads from the app bundle and reaches the host only through typed IPC commands and events.
+  - This holds for built apps. `npm run tauri dev` is the one exception: it loads the webview from the Vite dev server, bound to `127.0.0.1:5173`, for hot reload. Nothing in the app may depend on that server existing.
 - The webview holds no secrets and makes no direct calls to the engine, to inference providers or to the filesystem. All of that goes through the host.
 - The engine is reached over two channels that are not interchangeable.
   - Human channel: `stackql srv` over the Postgres wire protocol. Used by the explorer and the editor. Statements here are written or explicitly run by the operator.
@@ -41,27 +42,43 @@ These are the chosen defaults. Check the current stable version and API of each 
 | MCP client | `rmcp` (the official Rust MCP SDK) |
 | Secrets | OS keychain through the `keyring` crate |
 | Package manager | npm |
+| Webview tests | Vitest with jsdom |
+| Lint and format | ESLint with typescript-eslint, Prettier, rustfmt, clippy |
+| Process supervision | `windows-sys` job object on Windows, process group plus a pipe watchdog on Unix |
+| Clipboard | `arboard`, write only, through a host command |
 
 The MCP client library must support the client side of elicitation and protocol revision negotiation. Confirm that before committing to it.
 
+Version constraints found while building M0:
+
+- Rust 1.90 or later. Current Tauri 2 releases need it. Use rustup's stable toolchain, the same one CI uses.
+- TypeScript is pinned to 6.0.x. TypeScript 7 ships no compiler API, and typescript-eslint supports up to 6.0. Move to 7 when typescript-eslint does.
+- TanStack Table is v9. Its API differs from v8: `useTable`, and features are registered with `tableFeatures`.
+
 ## Repository layout
 
-The intended layout is below. Keep it current as the code lands.
+The layout is below. Keep it current as the code lands. Directories marked "planned" do not exist yet.
 
 ```
 stackql-workbench/
   src/                  webview (React)
-    panes/              explorer, editor, results, chat, activity, settings
-    host/               typed wrappers over IPC
+    host/               typed wrappers over IPC, the only Tauri imports
+    lib/                pure logic with tests: result state, cell content, explorer tree
+    state/              hooks that connect the host to the panes
+    panes/              explorer, editor, results, statusbar, settings (chat, activity planned)
+    ui/                 small shared components
   src-tauri/            host (Rust)
     src/
-      engine/           discovery, supervisor, process lifecycle
+      engine/           discovery, port selection, supervisor, job object, watchdog
       connection/       Connection trait, LocalConnection
-      query/            pg wire client, row streaming, cancel
-      agent/            MCP client, InferenceBackend trait, backends, loop
-      secrets/          keychain access
-      config/           settings and workspaces
+      query/            pg wire session, statement splitting, results, explorer statements
+      config/           settings
       ipc/              command and event definitions
+      agent/            planned: MCP client, InferenceBackend trait, backends, loop
+      secrets/          planned: keychain access
+    examples/           pgwire_spike, the probe behind docs/spike-pgwire.md
+    tests/              integration tests against a real stackql
+  scripts/              test launcher
   docs/                 design notes and spike reports
 ```
 
@@ -69,7 +86,7 @@ Only `src/host/` may import Tauri APIs. Panes call the typed wrappers in that di
 
 ## Commands
 
-These are the expected commands. Milestone M0 must make them true and then update this section with anything that differs.
+These commands all pass on Windows. Run them from the repository root unless noted.
 
 ```
 npm install
@@ -84,9 +101,26 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+Other commands that are useful:
+
+```
+npm run format                              format the webview sources
+npm run tauri build -- --no-bundle          release build of the executable, no installer
+npm run tauri build -- --debug --no-bundle  the debug build CI runs
+cd src-tauri && cargo run --example pgwire_spike   rerun the pg wire probe
+```
+
+Things to know about them:
+
+- `npm run lint` runs ESLint and then `prettier --check`.
+- `npm test` goes through `scripts/test.js`. Vitest fails on Windows when the working directory is spelled with a lower-case drive letter, which an editor terminal can do. The launcher corrects that.
+- `cargo test` includes integration tests that start a real `stackql`. They are skipped, with a note on stderr, when no binary is found. They need no credentials and no network.
+- The release executable is `src-tauri/target/release/stackql-workbench.exe` on Windows.
+- The engine's `--approot` is `<app data dir>/engine`. On Windows that is `%APPDATA%\io.stackql.workbench\engine`. Settings are in `<app config dir>/settings.json`.
+
 ## Engine interface
 
-The facts in this section were read from `stackql` `main` in November 2026. Confirm them against `stackql --help` for the installed version. The reference docs are `docs/mcp.md` and `pkg/mcp_server/README.md` in the stackql repository.
+The facts in this section were read from `stackql` `main` in November 2026, and the `srv` facts were then tested against `stackql` v1.0.888. The evidence is in `docs/spike-pgwire.md`. Confirm against `stackql --help` for the installed version. The reference docs are `docs/mcp.md` and `pkg/mcp_server/README.md` in the stackql repository.
 
 ### Discovery
 
@@ -100,23 +134,48 @@ Resolve the `stackql` binary in this order and stop at the first hit.
 
 Show the resolved path and version in the UI. If nothing is found, say so plainly and point at the settings field.
 
+The two explicit sources are strict. If the settings path or `STACKQL_BIN` is set and does not point to a file, that is an error and the search stops there. Running a different binary than the one the operator named would be worse than stopping.
+
 ### Process lifecycle
 
 One supervisor owns every child process.
 
-- Children must not outlive the app, including after a crash or force quit. Use a job object on Windows and a process group on macOS.
+- Children must not outlive the app, including after a crash or force quit. Use a job object on Windows, created with kill-on-close. On macOS a process group is not enough on its own, because nothing signals the group when the app receives SIGKILL. Each child therefore also gets a watchdog: `/bin/sh` blocked on a pipe that only the app holds open, which signals the group when the pipe closes.
+- The watchdog script must stay POSIX. `kill -s TERM -- -PGID` works in every `/bin/sh` tried. `kill -TERM -- -PGID` does not.
+- Start console children with `CREATE_NO_WINDOW` on Windows, otherwise a console window flashes up.
 - Wait for readiness with a timeout. Surface failures in the UI with the captured stderr.
 - Capture stderr of every child. For a stdio MCP process, stdout carries protocol frames only.
 
 ### `stackql srv` (human channel)
 
-The explorer and the editor use this channel.
+The explorer and the editor use this channel. Every point below was tested. See `docs/spike-pgwire.md`.
 
-- Always pass `--pgsrv.address 127.0.0.1`. The default is `0.0.0.0`.
-- Pass `--pgsrv.port` with a free port chosen by the host. The default is 5466 and may be taken.
-- Use the simple query protocol until the M0 spike confirms what else the server supports. Do not assume prepared statements, typed columns or cancel behave as they do in PostgreSQL.
-- Upstream API failures may surface as an empty result plus a notice or a stderr line, not as an error. Capture pg notices and `srv` stderr and show them beside the result.
-- The explorer is built from metadata statements: `SHOW PROVIDERS`, `SHOW SERVICES IN`, `SHOW RESOURCES IN`, `SHOW METHODS IN` and `DESCRIBE`. Quote or validate identifiers; never build statements by raw string interpolation of UI input.
+Flags the host passes:
+
+- `--pgsrv.address 127.0.0.1`, always. The default is `0.0.0.0` and the listener has no authentication.
+- `--pgsrv.port` with a free port chosen by the host. The default is 5466 and may be taken.
+- `--approot` with a directory under the app data directory. The default is `.stackql` in the working directory, so the provider cache would otherwise follow wherever the app was started from.
+- `--pgsrv.debug.enable`. Without it an upstream API failure is an empty, successful result with the reason only on stderr. With it the reason arrives as a pg notice on the connection that ran the statement.
+- `--env.file` when the operator has set a credentials file.
+
+How the server behaves:
+
+- Simple query protocol only. The extended protocol does not work through `tokio-postgres`. Statements are never parameterised.
+- One statement per message. The server runs the first statement in a message and silently drops the rest, so the host splits editor text and sends statements one at a time. It also cuts at a semicolon inside a string literal, which the host cannot work around.
+- Every value is text. Type OIDs carry no information. A SQL NULL arrives as an empty string.
+- The command tag has no row count. The host counts rows.
+- Rows do not stream. They all arrive when the statement finishes.
+- There is no cancel. A cancel request has no effect and closing the connection does not stop the work. The UI offers "stop waiting" and says the statement may still complete. Restarting the engine is the only way to stop a statement.
+- Errors carry a severity, the code `XXUUU` and a message. Nothing else.
+- Notices accumulate on a connection and are sent again with every later statement. The host reports only the newly appended text on the long-lived editor session.
+- Readiness: connect and run `SHOW VERSION`. The engine is ready about 100 ms after spawn. Give each connect attempt its own short timeout, because Windows retries a refused loopback connect for about half a second.
+
+How the host uses it:
+
+- The editor has one long-lived session. Each explorer statement gets its own short-lived session.
+- The explorer is built from metadata statements: `SHOW PROVIDERS`, `SHOW EXTENDED SERVICES IN`, `SHOW EXTENDED RESOURCES IN`, `SHOW EXTENDED METHODS IN`, `DESCRIBE EXTENDED` and `DESCRIBE METHOD EXTENDED`. Results are mapped by column name, not position.
+- Identifiers are validated and written in double quotes. This engine version rejects backticks. Never build statements by raw string interpolation of UI input.
+- A zero-row result that comes with a notice is treated as a probable upstream failure and shown as a warning, not as "no data".
 
 ### `stackql mcp` (agent channel)
 
@@ -144,6 +203,7 @@ Provider credentials are environment variables read by the engine. The app never
 
 - Apps launched from Finder or the Dock on macOS do not inherit shell profile exports. Do not rely on the app's own environment.
 - The host builds the child environment explicitly. Values come from the OS keychain and are injected at spawn, or from an operator-supplied dotenv file passed with `--env.file`.
+- Until the keychain store for provider credentials exists, the engine starts with the app's own environment as the base, plus the `--env.file` from settings. That works on Windows, where the app sees the user's environment variables. On macOS the env file is the dependable route.
 - The MCP `reload_credentials` tool re-sources `--env.file`. `stackql srv` needs a restart to pick up changes.
 - The UI shows variable names and whether they are set. Never log or display environment contents.
 

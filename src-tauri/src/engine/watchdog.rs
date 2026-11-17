@@ -26,10 +26,13 @@ use std::process::Stdio;
 
 use tokio::process::{Child, ChildStdin, Command};
 
+// `kill -s NAME -- -PGID` is the POSIX spelling. The shorter `kill -TERM --
+// -PGID` is rejected by dash, which is /bin/sh on many Linux systems, so the
+// form matters even though macOS ships a different shell.
 const SCRIPT: &str = r#"cat >/dev/null 2>&1
-kill -TERM -- "-$0" 2>/dev/null
+kill -s TERM -- "-$0" 2>/dev/null
 sleep 2
-kill -KILL -- "-$0" 2>/dev/null
+kill -s KILL -- "-$0" 2>/dev/null
 exit 0"#;
 
 pub struct Watchdog {
