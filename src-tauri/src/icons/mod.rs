@@ -121,13 +121,13 @@ impl ProviderIcons {
 
     async fn resolve(&self, key: &str) -> Option<ProviderIcon> {
         // The published dictionary wins if it ever lists a built-in provider.
-        match self.from_dictionary(key).await {
+        match self.dictionary_icon(key).await {
             Some(icon) => Some(icon),
             None => built_in_icon(key),
         }
     }
 
-    async fn from_dictionary(&self, key: &str) -> Option<ProviderIcon> {
+    async fn dictionary_icon(&self, key: &str) -> Option<ProviderIcon> {
         let entry = self.directory().await.lookup(key)?.clone();
         let bytes = self.icon_bytes(&entry).await?;
         let mime = directory::sniff_mime(&bytes)?;
