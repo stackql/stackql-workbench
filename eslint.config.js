@@ -49,6 +49,14 @@ export default defineConfig([
     },
   },
   {
+    // Tests pass mock functions to expect(), which this rule reads as
+    // detaching a method from its object.
+    files: ['**/*.test.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
+  {
     files: ['**/*.js'],
     extends: [js.configs.recommended],
   },

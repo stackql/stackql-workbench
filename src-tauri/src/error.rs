@@ -1,11 +1,12 @@
 //! The error type that crosses IPC.
 
 use serde::Serialize;
+use serde::ser::SerializeStruct;
 
-/// An error the webview can show. It serialises as `{ "kind": ..., "message": ... }`
-/// so the UI can branch on the kind without parsing text.
-#[derive(Debug, Clone, thiserror::Error, Serialize, PartialEq, Eq)]
-#[serde(tag = "kind", content = "message", rename_all = "camelCase")]
+/// An error the webview can show. It serialises as
+/// `{ "kind": ..., "message": ... }`, so the UI can branch on the kind
+/// without parsing text and always has a message to display.
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum HostError {
     /// No `stackql` binary could be resolved.
     #[error("{0}")]
@@ -39,6 +40,33 @@ pub enum HostError {
     Internal(String),
 }
 
+impl HostError {
+    /// A stable identifier for the variant.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::EngineNotFound(_) => "engineNotFound",
+            Self::EngineStart(_) => "engineStart",
+            Self::EngineNotRunning => "engineNotRunning",
+            Self::Query(_) => "query",
+            Self::Busy => "busy",
+            Self::InvalidIdentifier(_) => "invalidIdentifier",
+            Self::Settings(_) => "settings",
+            Self::Agent(_) => "agent",
+            Self::Secrets(_) => "secrets",
+            Self::Internal(_) => "internal",
+        }
+    }
+}
+
+impl Serialize for HostError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("HostError", 2)?;
+        state.serialize_field("kind", self.kind())?;
+        state.serialize_field("message", &self.to_string())?;
+        state.end()
+    }
+}
+
 impl From<std::io::Error> for HostError {
     fn from(err: std::io::Error) -> Self {
         Self::Internal(err.to_string())
@@ -61,8 +89,11 @@ mod tests {
     }
 
     #[test]
-    fn unit_variants_serialise_with_kind_only() {
+    fn variants_without_data_still_carry_a_message() {
         let json = serde_json::to_value(HostError::Busy).unwrap();
-        assert_eq!(json, serde_json::json!({ "kind": "busy" }));
+        assert_eq!(
+            json,
+            serde_json::json!({ "kind": "busy", "message": "A statement is already running." })
+        );
     }
 }
