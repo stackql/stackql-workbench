@@ -25,8 +25,7 @@ const result = spawnSync(process.execPath, [vitest, 'run', ...process.argv.slice
 });
 
 if (result.error) {
-  process.stderr.write(`${result.error.message}
-`);
+  process.stderr.write(result.error.message + '\n');
   process.exit(1);
 }
 process.exit(result.status ?? 1);

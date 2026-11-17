@@ -69,6 +69,7 @@ pub fn run() {
             ipc::settings_save,
             ipc::query_run,
             ipc::query_abandon,
+            ipc::clipboard_write_text,
             ipc::explorer_providers,
             ipc::explorer_services,
             ipc::explorer_resources,

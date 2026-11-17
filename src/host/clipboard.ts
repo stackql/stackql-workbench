@@ -1,33 +1,15 @@
-// Copying text. The webview's own clipboard API is enough, so no host call
-// and no plugin is involved.
+// Copying text goes through the host. The webview's own clipboard API depends
+// on focus and on how the platform webview treats the app's origin, so the
+// host does it instead, the same way on every platform.
 
-/** Copies text to the clipboard. Resolves to false if the webview refused. */
+import { invoke } from '@tauri-apps/api/core';
+
+/** Copies text to the system clipboard. Resolves to false if it could not. */
 export async function copyText(text: string): Promise<boolean> {
   try {
-    await navigator.clipboard.writeText(text);
+    await invoke('clipboard_write_text', { text });
     return true;
   } catch {
-    return copyWithSelection(text);
+    return false;
   }
-}
-
-// Fallback for a webview that does not expose the async clipboard API.
-function copyWithSelection(text: string): boolean {
-  const area = document.createElement('textarea');
-  area.value = text;
-  area.setAttribute('readonly', '');
-  area.style.position = 'fixed';
-  area.style.opacity = '0';
-  document.body.appendChild(area);
-  area.select();
-  let ok: boolean;
-  try {
-    // Deprecated, but it is the only fallback there is.
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    ok = document.execCommand('copy');
-  } catch {
-    ok = false;
-  }
-  area.remove();
-  return ok;
 }

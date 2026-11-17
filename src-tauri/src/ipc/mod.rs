@@ -10,7 +10,7 @@ use tauri::ipc::Channel;
 
 use crate::config::{Settings, SettingsStore};
 use crate::connection::{Connection, EngineStatus, EventSink};
-use crate::error::HostResult;
+use crate::error::{HostError, HostResult};
 use crate::query::explorer::{self, Field, Method, MethodField, Provider, Resource, Service};
 use crate::query::result::{QueryEvent, RunSummary};
 
@@ -82,6 +82,20 @@ pub async fn query_run(
 #[tauri::command]
 pub async fn query_abandon(state: State<'_, AppState>, run_id: String) -> HostResult<bool> {
     Ok(state.connection.abandon(&run_id))
+}
+
+/// Puts text on the system clipboard. Write only: the webview cannot read
+/// the clipboard through the host.
+///
+/// Not async, so it runs on the main thread, which is where macOS expects
+/// pasteboard access.
+#[tauri::command]
+pub fn clipboard_write_text(text: String) -> HostResult<()> {
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|err| HostError::Internal(format!("Could not open the clipboard: {err}")))?;
+    clipboard
+        .set_text(text)
+        .map_err(|err| HostError::Internal(format!("Could not copy to the clipboard: {err}")))
 }
 
 #[tauri::command]

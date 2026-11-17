@@ -33,23 +33,33 @@ interface GridProps {
   onOpen: (cell: CellRef) => void;
 }
 
-function initialWidth(name: string): number {
-  return Math.min(320, Math.max(90, name.length * 8 + 36));
+const SAMPLE_ROWS = 50;
+const CHAR_WIDTH = 7.3;
+
+/** A starting width that fits the header and the first rows, within limits. */
+function initialWidth(name: string, index: number, sample: Row[]): number {
+  let chars = name.length + 1;
+  for (const row of sample) {
+    const value = row[index];
+    chars = Math.max(chars, value === null || value === undefined ? 4 : Math.min(value.length, 44));
+  }
+  return Math.round(Math.min(360, Math.max(72, chars * CHAR_WIDTH + 22)));
 }
 
 /** A read-only grid. Rows are virtualised, so only the visible ones are in the DOM. */
 export function Grid({ columns, rows, selected, onSelect, onOpen }: GridProps) {
-  const columnDefs = useMemo<ColumnDef<GridFeatures, Row>[]>(
-    () =>
-      columns.map((name, index) => ({
-        // Column names can repeat, so the id is positional.
-        id: `c${index}`,
-        header: name,
-        accessorFn: (row: Row) => row[index] ?? null,
-        size: initialWidth(name),
-      })),
-    [columns],
-  );
+  // Sized from the first rows. A width the operator sets by dragging is kept
+  // by the table and wins over these.
+  const columnDefs = useMemo<ColumnDef<GridFeatures, Row>[]>(() => {
+    const sample = rows.slice(0, SAMPLE_ROWS);
+    return columns.map((name, index) => ({
+      // Column names can repeat, so the id is positional.
+      id: `c${index}`,
+      header: name,
+      accessorFn: (row: Row) => row[index] ?? null,
+      size: initialWidth(name, index, sample),
+    }));
+  }, [columns, rows]);
 
   const table = useTable(
     {

@@ -58,40 +58,43 @@
   }
 }
 
-html,
-body,
-#root {
-  height: 100%;
-}
+/* In the base layer, so that utility classes win over these element rules. */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
 
-body {
-  margin: 0;
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  font-size: 13px;
-  overflow: hidden;
-  /* The app is a tool, not a document: no accidental text selection in chrome. */
-  user-select: none;
-  -webkit-user-select: none;
-}
+  body {
+    margin: 0;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    overflow: hidden;
+    /* The app is a tool, not a document: no accidental text selection in chrome. */
+    user-select: none;
+    -webkit-user-select: none;
+  }
 
-/* Content the operator may want to copy stays selectable. */
-.selectable {
-  user-select: text;
-  -webkit-user-select: text;
-}
+  /* Content the operator may want to copy stays selectable. */
+  .selectable {
+    user-select: text;
+    -webkit-user-select: text;
+  }
 
-button {
-  font: inherit;
-  color: inherit;
-}
+  button {
+    font: inherit;
+    color: inherit;
+  }
 
-button:focus-visible,
-input:focus-visible,
-[tabindex]:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
+  button:focus-visible,
+  input:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
 }
 
 ::-webkit-scrollbar {

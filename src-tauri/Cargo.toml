@@ -36,6 +36,8 @@ tokio = { version = "1", features = [
 ] }
 tokio-postgres = "0.7"
 futures-util = "0.3"
+# Text only. The default feature adds image support, which is not used.
+arboard = { version = "3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

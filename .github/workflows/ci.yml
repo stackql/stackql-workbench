@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Puts stackql on PATH so the integration tests run instead of being
+      # skipped. They use metadata statements and the built-in provider only:
+      # no credentials and no provider downloads.
+      - uses: stackql/setup-stackql@v2
+
+      - name: Tool versions
+        shell: bash
+        run: |
+          node --version
+          npm --version
+          rustc --version
+          cargo --version
+          stackql --version
+
+      - name: Install webview dependencies
+        run: npm ci
+
+      - name: Lint and format check (webview)
+        run: npm run lint
+
+      - name: Typecheck (webview)
+        run: npm run typecheck
+
+      - name: Test (webview)
+        run: npm test
+
+      - name: Format check (host)
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Lint (host)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test (host)
+        working-directory: src-tauri
+        run: cargo test
+
+      # Builds the webview bundle and the host together, without installers.
+      - name: Debug build
+        run: npm run tauri build -- --debug --no-bundle
