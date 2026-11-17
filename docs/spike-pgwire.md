@@ -31,7 +31,8 @@ Each row is an answer to one of the spike questions. The sections below hold the
 | Does `tokio-postgres` connect cleanly? | Yes, with `NoTls`. No password, no TLS, any user and database name accepted |
 | Startup, auth, TLS | `AuthenticationOk` straight away, six `ParameterStatus` messages, **no `BackendKeyData`**. An `SSLRequest` is answered `N` |
 | Query protocols | Simple protocol only. The extended protocol is not usable through `tokio-postgres` |
-| Several statements in one message | **Only the first statement runs. The rest are dropped without an error** |
+| Several statements in one message | **Only the first statement runs. The rest are dropped without an error.** The cut is at the first semicolon, even inside a string literal |
+| Identifier quoting | Double quotes, accepted in every metadata statement. Backticks are rejected |
 | Column type information | Every column is type OID 25 (`text`) in text format. The one exception seen is `count(*)`, which is OID 1700 (`numeric`). `typlen` is 1024 for everything |
 | Are values text? | Yes, always. Booleans arrive as `true`/`false`, numbers as digits, objects and arrays as JSON text |
 | NULL | `SELECT NULL` arrives as an empty string, not as a protocol NULL |
@@ -125,6 +126,18 @@ This is the finding most likely to surprise. When a simple query message holds m
 ```
 
 The host must split editor text into statements and send them one at a time. `stackql exec` does run every statement in its input, so this is specific to `srv`.
+
+The cut is made at the first semicolon in the message, with no regard for quoting. A semicolon inside a string literal ends the statement there, and what is left fails to parse. `stackql exec` handles the same text correctly.
+
+```
+> SELECT 1 AS one, 'a;b' AS s          (sent through srv)
+  ERROR  query returns error: ... syntax error at position 20 near 'a'
+
+> stackql exec "SELECT 1 AS one, 'a;b' AS s"
+  [{"one":"1","s":"a;b"}]
+```
+
+The host's splitter respects string literals, quoted identifiers and comments, so it never cuts a statement in the wrong place. It cannot rescue a literal that contains a semicolon, because the engine cuts it again. Such a statement fails with a syntax error until the engine is fixed.
 
 Other edge cases, for completeness: an empty string and a lone `;` both get `EmptyQueryResponse`. A message holding only a comment gets a `RowDescription` with no columns and the tag `OK`. A trailing `;` or a trailing `--` comment is fine.
 
@@ -378,7 +391,8 @@ Notes for the explorer:
 - `param_type` is `input_required`, `input_optional` or `output`. The `output` rows are the columns a `SELECT` through that method can return.
 - Views show up as resources (`vw_*`). `DESCRIBE` on a view can return an empty `type`.
 - The keyword order is `DESCRIBE METHOD EXTENDED`. `DESCRIBE EXTENDED METHOD` is a syntax error.
-- A column name that is a reserved word, such as `desc`, must be written in double quotes. A backtick in that position is a syntax error.
+- Identifiers are quoted with double quotes. Every statement in the table above accepts double-quoted names, for example `SHOW EXTENDED RESOURCES IN "homebrew"."formula"`, so the host quotes every name it puts in a statement. Backticks are rejected everywhere in this engine version, although the public documentation suggests them for names that contain dots.
+- A column name that is a reserved word, such as `desc`, must be written in double quotes.
 - `SHOW EXTENDED METHODS` on a large provider took 251 ms the first time, while the provider document loaded. Everything else took single-digit milliseconds.
 
 ## Readiness
@@ -427,6 +441,7 @@ These came out of the spike and need an engine-side answer.
 
 - Cancel needs `BackendKeyData` and a `CancelRequest` handler in `srv`. Without them M1's cancel is a "stop waiting" button only.
 - Dropping statements after the first, with no error, looks like a defect in `srv`. The host works around it by splitting.
+- `srv` cuts a message at the first semicolon even inside a string literal, so a literal containing a semicolon cannot be sent. There is no host-side workaround.
 - The per-connection notice buffer is never cleared. The host works around it, but a fix in the engine would be cleaner.
 - An upstream failure returning success with zero rows is easy to misread. An error, or at least a notice without a debug flag, would be safer.
 - `NULL` arrives as an empty string.
