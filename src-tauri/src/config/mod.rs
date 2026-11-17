@@ -8,8 +8,24 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::backend::BackendKind;
+use crate::connection::SafetyMode;
 use crate::error::{HostError, HostResult};
 use crate::util::lock;
+
+/// Which model the chat uses. The API key is not here. It is in the OS
+/// keychain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InferenceSettings {
+    pub kind: BackendKind,
+    /// Empty means the backend's default model.
+    #[serde(default)]
+    pub model: String,
+    /// Empty means the backend's default address.
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -19,6 +35,12 @@ pub struct Settings {
     /// A dotenv file the engine sources at startup, passed with `--env.file`.
     /// The app never reads it.
     pub env_file: Option<String>,
+    /// What the agent may do without asking. Passed to the engine, which
+    /// enforces it.
+    pub safety_mode: SafetyMode,
+    /// The inference backend. `None` means chat is not configured, and the
+    /// chat pane is hidden.
+    pub inference: Option<InferenceSettings>,
 }
 
 impl Settings {
@@ -26,6 +48,10 @@ impl Settings {
     pub fn normalised(mut self) -> Self {
         self.engine_path = clean(self.engine_path);
         self.env_file = clean(self.env_file);
+        if let Some(inference) = &mut self.inference {
+            inference.model = inference.model.trim().to_string();
+            inference.base_url = clean(inference.base_url.take());
+        }
         self
     }
 }
@@ -142,7 +168,7 @@ mod tests {
         store
             .replace(Settings {
                 engine_path: Some("C:\\tools\\stackql.exe".into()),
-                env_file: None,
+                ..Settings::default()
             })
             .unwrap();
 
@@ -166,6 +192,7 @@ mod tests {
             .replace(Settings {
                 engine_path: Some("  \"C:\\Program Files\\StackQL\\stackql.exe\"  ".into()),
                 env_file: Some("   ".into()),
+                ..Settings::default()
             })
             .unwrap();
         assert_eq!(
@@ -183,6 +210,45 @@ mod tests {
         let store = SettingsStore::load(path.clone());
         assert_eq!(store.get(), Settings::default());
         assert!(store.load_warning().unwrap().contains("could not be read"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn the_safety_mode_defaults_to_safe_and_chat_to_unconfigured() {
+        let settings = Settings::default();
+        assert_eq!(settings.safety_mode, SafetyMode::Safe);
+        assert_eq!(settings.inference, None);
+    }
+
+    #[test]
+    fn inference_settings_round_trip_and_never_hold_a_key() {
+        let path = temp_file("inference");
+        let store = SettingsStore::load(path.clone());
+        store
+            .replace(Settings {
+                safety_mode: SafetyMode::DeleteSafe,
+                inference: Some(InferenceSettings {
+                    kind: BackendKind::Gemini,
+                    model: "  gemini-test  ".into(),
+                    base_url: Some("   ".into()),
+                }),
+                ..Settings::default()
+            })
+            .unwrap();
+
+        let reloaded = SettingsStore::load(path.clone()).get();
+        assert_eq!(reloaded.safety_mode, SafetyMode::DeleteSafe);
+        let inference = reloaded.inference.unwrap();
+        assert_eq!(inference.kind, BackendKind::Gemini);
+        assert_eq!(inference.model, "gemini-test");
+        assert_eq!(inference.base_url, None);
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"safetyMode\": \"delete_safe\""), "{text}");
+        assert!(
+            !text.to_lowercase().contains("key"),
+            "no key belongs in settings: {text}"
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

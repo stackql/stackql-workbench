@@ -37,7 +37,8 @@ fn scratch_approot(name: &str) -> PathBuf {
 async fn started(name: &str) -> (LocalConnection, PathBuf) {
     let approot = scratch_approot(name);
     let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
-    let connection = LocalConnection::new(approot.clone(), settings).unwrap();
+    let connection =
+        LocalConnection::new(approot.clone(), approot.join("audit"), settings).unwrap();
     let status = connection.start().await;
     assert_eq!(
         status.state,
@@ -289,7 +290,8 @@ async fn explorer_statements_work_against_the_built_in_provider() {
 async fn a_run_without_an_engine_says_so() {
     let approot = scratch_approot("stopped");
     let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
-    let connection = LocalConnection::new(approot, settings).unwrap();
+    let connection =
+        LocalConnection::new(approot.clone(), approot.join("audit"), settings).unwrap();
     let (sink, _) = collector();
     let err = connection
         .run("run-1".into(), "SHOW VERSION".into(), sink)
@@ -304,9 +306,10 @@ async fn a_wrong_engine_path_is_reported_in_the_status() {
     let approot = scratch_approot("badpath");
     let settings = Arc::new(SettingsStore::in_memory(Settings {
         engine_path: Some("/definitely/not/here/stackql".into()),
-        env_file: None,
+        ..Settings::default()
     }));
-    let connection = LocalConnection::new(approot, settings).unwrap();
+    let connection =
+        LocalConnection::new(approot.clone(), approot.join("audit"), settings).unwrap();
     let status = connection.start().await;
     assert_eq!(status.state, EngineState::Failed);
     let error = status.error.unwrap();

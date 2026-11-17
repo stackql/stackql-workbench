@@ -3,6 +3,8 @@
 //! The host owns every process, connection and secret. The webview reaches it
 //! only through the typed IPC commands and events defined in [`ipc`].
 
+pub mod activity;
+pub mod agent;
 pub mod config;
 pub mod connection;
 pub mod engine;
@@ -10,17 +12,21 @@ pub mod error;
 pub mod icons;
 pub mod ipc;
 pub mod query;
+pub mod secrets;
 pub mod util;
 
 use std::sync::Arc;
 
 use tauri::{Emitter, Manager, RunEvent};
 
+use crate::activity::History;
+use crate::agent::runtime::AgentRuntime;
 use crate::config::SettingsStore;
 use crate::connection::Connection;
 use crate::connection::local::LocalConnection;
 use crate::icons::ProviderIcons;
 use crate::ipc::AppState;
+use crate::secrets::{KeychainStore, MemoryStore, SecretStore};
 
 fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let config_dir = app.path().app_config_dir()?;
@@ -32,6 +38,7 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // default would be whatever directory the app was started from.
     let connection: Arc<dyn Connection> = Arc::new(LocalConnection::new(
         data_dir.join("engine"),
+        data_dir.join("audit"),
         settings.clone(),
     )?);
 
@@ -54,10 +61,21 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         starting.start().await;
     });
 
+    // API keys live in the OS keychain. If it cannot be opened, keys are
+    // held in memory for this run and the settings pane says so.
+    let (secrets, keychain_available): (Arc<dyn SecretStore>, bool) = match KeychainStore::open() {
+        Ok(store) => (Arc::new(store), true),
+        Err(_) => (Arc::new(MemoryStore::default()), false),
+    };
+
     app.manage(AppState {
+        agent: Arc::new(AgentRuntime::new(connection.clone())),
         connection,
         settings,
         icons: Arc::new(ProviderIcons::new(cache_dir.join("provider-icons"))),
+        secrets,
+        keychain_available,
+        history: Arc::new(History::new(data_dir.join("history.jsonl"))),
     });
     Ok(())
 }
@@ -81,6 +99,15 @@ pub fn run() {
             ipc::explorer_methods,
             ipc::explorer_fields,
             ipc::explorer_method_fields,
+            ipc::agent_config_get,
+            ipc::agent_config_save,
+            ipc::agent_config_clear,
+            ipc::agent_set_safety_mode,
+            ipc::agent_send,
+            ipc::agent_approve,
+            ipc::agent_stop,
+            ipc::agent_reset,
+            ipc::activity_list,
         ])
         .build(tauri::generate_context!());
 

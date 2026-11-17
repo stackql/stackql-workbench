@@ -7,12 +7,58 @@
 
 pub mod local;
 
+use std::any::Any;
+
 use futures_util::future::BoxFuture;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::watch;
 
+pub use crate::engine::logbuf::LogBuffer;
 use crate::error::HostResult;
 use crate::query::result::{QueryEvent, ResultSet, RunSummary};
+
+/// The workspace safety setting. It maps directly onto the MCP server's
+/// `server.mode`. The engine does the classification and the gating. The
+/// host only passes the mode on and renders the approval prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SafetyMode {
+    ReadOnly,
+    #[default]
+    Safe,
+    DeleteSafe,
+    FullAccess,
+}
+
+impl SafetyMode {
+    /// The value the engine expects in `server.mode`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read_only",
+            Self::Safe => "safe",
+            Self::DeleteSafe => "delete_safe",
+            Self::FullAccess => "full_access",
+        }
+    }
+}
+
+/// A byte stream to the engine's MCP server, for the agent runtime only.
+///
+/// For a local engine this is the stdio of a child process. For a remote
+/// engine it would be something else, which is why the agent runtime gets
+/// streams and not a process.
+pub struct AgentChannel {
+    /// Protocol frames from the server.
+    pub reader: Box<dyn AsyncRead + Send + Unpin>,
+    /// Protocol frames to the server.
+    pub writer: Box<dyn AsyncWrite + Send + Unpin>,
+    /// What the server writes outside the protocol. Upstream failures show
+    /// up here and nowhere else.
+    pub diagnostics: LogBuffer,
+    /// Keeps the channel open. Dropping it tears the channel down.
+    pub keepalive: Box<dyn Any + Send + Sync>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,4 +145,13 @@ pub trait Connection: Send + Sync + 'static {
     /// returns the whole result. Used for metadata. Never pass text from the
     /// webview here.
     fn fetch(&self, sql: String) -> BoxFuture<'_, HostResult<ResultSet>>;
+
+    /// Opens the agent channel: a fresh MCP server session in the given
+    /// safety mode. Statements sent here originate from a model, so this is
+    /// kept apart from the operator's channel on purpose.
+    fn open_agent_channel(&self, mode: SafetyMode) -> BoxFuture<'_, HostResult<AgentChannel>>;
+
+    /// The directory the engine writes its agent audit log to, if it keeps
+    /// one where the host can read it.
+    fn audit_dir(&self) -> Option<std::path::PathBuf>;
 }

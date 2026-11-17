@@ -14,7 +14,7 @@ use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use tokio::sync::{Notify, watch};
 
-use super::{Connection, EngineState, EngineStatus, EventSink};
+use super::{AgentChannel, Connection, EngineState, EngineStatus, EventSink, SafetyMode};
 use crate::config::SettingsStore;
 use crate::engine::discovery::{self, Inputs, Resolved};
 use crate::engine::logbuf::LogBuffer;
@@ -46,6 +46,9 @@ struct Endpoint {
 struct Shared {
     status: watch::Sender<EngineStatus>,
     endpoint: Mutex<Option<Endpoint>>,
+    /// The binary the running engine was started from. The agent channel
+    /// starts its MCP server from the same one.
+    binary: Mutex<Option<PathBuf>>,
     /// Bumped on every start and stop, so a watcher from an earlier engine
     /// cannot overwrite the status of a later one.
     generation: AtomicU64,
@@ -61,6 +64,8 @@ pub struct LocalConnection {
     supervisor: Supervisor,
     /// The engine's `--approot` and working directory.
     approot: PathBuf,
+    /// Where the MCP server writes its audit log.
+    audit_dir: PathBuf,
     settings: Arc<SettingsStore>,
     shared: Arc<Shared>,
     /// Serialises start and stop. Holds the engine process.
@@ -71,16 +76,22 @@ pub struct LocalConnection {
 }
 
 impl LocalConnection {
-    pub fn new(approot: PathBuf, settings: Arc<SettingsStore>) -> HostResult<Self> {
+    pub fn new(
+        approot: PathBuf,
+        audit_dir: PathBuf,
+        settings: Arc<SettingsStore>,
+    ) -> HostResult<Self> {
         let supervisor = Supervisor::new().map_err(|err| HostError::Internal(err.to_string()))?;
         let (status, _) = watch::channel(EngineStatus::stopped());
         Ok(Self {
             supervisor,
             approot,
+            audit_dir,
             settings,
             shared: Arc::new(Shared {
                 status,
                 endpoint: Mutex::new(None),
+                binary: Mutex::new(None),
                 generation: AtomicU64::new(0),
             }),
             lifecycle: tokio::sync::Mutex::new(None),
@@ -120,9 +131,43 @@ impl LocalConnection {
         args
     }
 
+    /// Arguments for `stackql mcp`. See `docs/spike-mcp.md`.
+    fn mcp_args(&self, mode: SafetyMode, env_file: Option<&str>) -> Vec<OsString> {
+        let config = serde_json::json!({
+            "server": {
+                "transport": "stdio",
+                // The engine classifies each statement and enforces this.
+                "mode": mode.as_str(),
+                // The default is 30 seconds, which a paged provider query
+                // can exceed.
+                "request_timeout": "5m",
+                "audit": {
+                    "format": "jsonl",
+                    // The default is the working directory.
+                    "file": { "dir": self.audit_dir }
+                }
+            }
+        });
+        let mut args: Vec<OsString> = vec![
+            "mcp".into(),
+            // The default transport is HTTP.
+            "--mcp.server.type=stdio".into(),
+            "--approot".into(),
+            self.approot.clone().into_os_string(),
+        ];
+        if let Some(file) = env_file {
+            args.push("--env.file".into());
+            args.push(file.into());
+        }
+        args.push("--mcp.config".into());
+        args.push(config.to_string().into());
+        args
+    }
+
     async fn stop_engine(&self, child: &mut Option<ManagedChild>) {
         self.shared.generation.fetch_add(1, Ordering::SeqCst);
         *lock(&self.shared.endpoint) = None;
+        *lock(&self.shared.binary) = None;
         // Drop the session first so its socket closes before the engine goes.
         if let Ok(mut session) = self.session.try_lock() {
             *session = None;
@@ -184,7 +229,7 @@ impl LocalConnection {
             Err(err) => return fail(status, format!("No free port: {err}"), Vec::new()),
         };
         let spec = ChildSpec {
-            program: path,
+            program: path.clone(),
             args: self.srv_args(port, settings.env_file.as_deref()),
             // The engine reads provider credentials from its environment.
             // Until the keychain store exists, the app's environment is the
@@ -223,6 +268,7 @@ impl LocalConnection {
             port,
             stderr: running.stderr.clone(),
         });
+        *lock(&self.shared.binary) = Some(path);
         status.state = EngineState::Running;
         self.shared.set_status(status.clone());
 
@@ -475,5 +521,53 @@ impl Connection for LocalConnection {
                 .map_err(|err| HostError::Query(err.message))
         }
         .boxed()
+    }
+
+    fn open_agent_channel(&self, mode: SafetyMode) -> BoxFuture<'_, HostResult<AgentChannel>> {
+        async move {
+            let binary = lock(&self.shared.binary)
+                .clone()
+                .ok_or(HostError::EngineNotRunning)?;
+            std::fs::create_dir_all(&self.audit_dir).map_err(|err| {
+                HostError::Agent(format!(
+                    "Could not create the audit folder {}: {err}",
+                    self.audit_dir.display()
+                ))
+            })?;
+            let settings = self.settings.get();
+            let spec = ChildSpec {
+                program: binary,
+                args: self.mcp_args(mode, settings.env_file.as_deref()),
+                // Same environment policy as the operator's engine. The model
+                // never sees any of it: tool results are all it receives.
+                env: EnvSpec {
+                    inherit: true,
+                    vars: Vec::new(),
+                },
+                cwd: self.approot.clone(),
+                // stdout and stdin carry protocol frames and nothing else.
+                stdio: StdioMode::Piped,
+            };
+            let mut child = self
+                .supervisor
+                .spawn(&spec)
+                .map_err(|err| HostError::Agent(err.to_string()))?;
+            let (Some(reader), Some(writer)) = (child.stdout.take(), child.stdin.take()) else {
+                return Err(HostError::Agent(
+                    "The engine's MCP server started without stdio pipes.".to_string(),
+                ));
+            };
+            Ok(AgentChannel {
+                reader: Box::new(reader),
+                writer: Box::new(writer),
+                diagnostics: child.stderr.clone(),
+                keepalive: Box::new(child),
+            })
+        }
+        .boxed()
+    }
+
+    fn audit_dir(&self) -> Option<PathBuf> {
+        Some(self.audit_dir.clone())
     }
 }
