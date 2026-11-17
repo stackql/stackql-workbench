@@ -229,7 +229,7 @@ A few fixed points for the interface.
 
 - Brand colour is Classic Blue, `#0F4C81`.
 - The app icon is StackQL's own favicon. The files in `src-tauri/icons/` were generated with `npx tauri icon` from `static/android-chrome-512x512.png` in the `stackql/stackql.io` repository, which is the same mark as its `favicon.ico` at a usable resolution.
-- Provider nodes in the explorer show the provider's own icon. The host resolves it through the provider dictionary published at `src/configs/providers.json` in `stackql/stackql.io`, fetches the icon from `stackql.io`, caches it in the app cache directory and passes it to the webview as a `data:` URL. A provider with no entry, or whose icon cannot be fetched, shows the letter badge. The webview itself still makes no network calls. A snapshot of the dictionary is compiled in as a fallback.
+- Provider nodes in the explorer show the provider's own icon. The host resolves it through the provider dictionary published at `src/configs/providers.json` in `stackql/stackql.io`, fetches the icon from `stackql.io`, caches it in the app cache directory and passes it to the webview as a `data:` URL. A provider with no entry, or whose icon cannot be fetched, shows the letter badge. Providers built into the engine, such as `stackql_preview`, show the StackQL icon, which is compiled in. The webview itself still makes no network calls. A snapshot of the dictionary is compiled in as a fallback.
 - Saved queries are plain `.iql` files on disk, not an app database.
 - Pane set: explorer tree, editor tabs, results grid, chat, activity, settings.
 - Nested JSON is common in results. The grid needs a cell viewer for it.

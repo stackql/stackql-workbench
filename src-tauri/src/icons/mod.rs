@@ -4,7 +4,9 @@
 //! up in the dictionary published by stackql.io, fetches its icon from that
 //! site, keeps it in the app cache directory and hands it to the webview as
 //! a `data:` URL. A provider with no entry, or whose icon cannot be fetched,
-//! has no icon and the explorer falls back to its letter badge.
+//! has no icon and the explorer falls back to its letter badge. Providers
+//! built into the engine, such as `stackql_preview`, show StackQL's own icon,
+//! which is compiled in.
 //!
 //! Only two hosts are ever contacted: the one that publishes the dictionary
 //! and the icon site. Icon paths from the dictionary are checked before use.
@@ -30,6 +32,21 @@ const ICON_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const MAX_ICON_BYTES: usize = 512 * 1024;
 const MAX_DICTIONARY_BYTES: usize = 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// StackQL's own icon, compiled in. Shown for the providers that are built
+/// into the engine, which the published dictionary does not list.
+const STACKQL_ICON: &[u8] = include_bytes!("../../icons/64x64.png");
+
+/// The icon for a provider that is part of the engine itself, such as
+/// `stackql_preview`.
+fn built_in_icon(key: &str) -> Option<ProviderIcon> {
+    let built_in = key == "stackql" || key.starts_with("stackql_");
+    built_in.then(|| ProviderIcon {
+        data_url: directory::data_url("image/png", STACKQL_ICON),
+        invert_on_dark: false,
+        display_name: "StackQL".to_string(),
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,6 +120,14 @@ impl ProviderIcons {
     }
 
     async fn resolve(&self, key: &str) -> Option<ProviderIcon> {
+        // The published dictionary wins if it ever lists a built-in provider.
+        match self.from_dictionary(key).await {
+            Some(icon) => Some(icon),
+            None => built_in_icon(key),
+        }
+    }
+
+    async fn from_dictionary(&self, key: &str) -> Option<ProviderIcon> {
         let entry = self.directory().await.lookup(key)?.clone();
         let bytes = self.icon_bytes(&entry).await?;
         let mime = directory::sniff_mime(&bytes)?;
@@ -253,8 +278,23 @@ mod tests {
     async fn a_provider_without_an_entry_has_no_icon() {
         let dir = cache("unknown");
         let icons = ProviderIcons::offline(dir.clone());
-        assert_eq!(icons.icon("stackql_preview").await, None);
         assert_eq!(icons.icon("no_such_provider").await, None);
+        // Not a built-in just because the name mentions stackql somewhere.
+        assert_eq!(icons.icon("my_stackql_thing").await, None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn built_in_providers_show_the_stackql_icon_without_the_network() {
+        let dir = cache("builtin");
+        let icons = ProviderIcons::offline(dir.clone());
+
+        let icon = icons.icon("stackql_preview").await.expect("built-in icon");
+        assert!(icon.data_url.starts_with("data:image/png;base64,"));
+        assert_eq!(icon.display_name, "StackQL");
+        assert!(!icon.invert_on_dark);
+        // The compiled-in file really is an image.
+        assert_eq!(directory::sniff_mime(STACKQL_ICON), Some("image/png"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -313,7 +353,7 @@ mod tests {
         let found = icons
             .icons(&[
                 "aws".to_string(),
-                "stackql_preview".to_string(),
+                "no_such_provider".to_string(),
                 "github".to_string(),
             ])
             .await;
