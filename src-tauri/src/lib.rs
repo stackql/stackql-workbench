@@ -3,6 +3,10 @@
 //! The host owns every process, connection and secret. The webview reaches it
 //! only through the typed IPC commands and events defined in [`ipc`].
 
+pub mod engine;
+pub mod error;
+pub mod util;
+
 /// Starts the app. Does not return until the app exits.
 pub fn run() {
     let result = tauri::Builder::default().run(tauri::generate_context!());
