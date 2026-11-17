@@ -2,7 +2,7 @@
 
 Desktop query IDE and chat interface for [StackQL](https://github.com/stackql/stackql), for Windows and macOS.
 
-Status: pre-alpha. The design is settled and M0 is the current milestone. Nothing here is released yet.
+Status: pre-alpha. The query IDE foundations (M0) and the core of chat (M3) work on Windows. Nothing here is released yet, and nothing has been run on macOS.
 
 ## Overview
 
@@ -158,11 +158,11 @@ Provider credentials are environment variables read by the engine, as they are f
 
 ## Development
 
-The commands below apply once M0 has landed.
+These steps were run on Windows 11.
 
 Prerequisites:
 
-- Rust stable toolchain
+- Rust stable toolchain, 1.90 or later, from rustup
 - Node.js LTS
 - The [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform
 - A `stackql` binary on `PATH`, or its location in the `STACKQL_BIN` environment variable
@@ -171,6 +171,14 @@ Prerequisites:
 npm install
 npm run tauri dev
 ```
+
+To build the executable without an installer:
+
+```
+npm run tauri build -- --no-bundle
+```
+
+On Windows that produces `src-tauri/target/release/stackql-workbench.exe`.
 
 Checks:
 
@@ -185,30 +193,49 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+The integration tests start a real `stackql` and are skipped when none is found. They need no cloud credentials and no network.
+
+### Using the app
+
+The engine keeps its provider cache under the app's own data directory, so a first run lists only the provider built into the engine. Run `REGISTRY PULL github;` in the editor to install one.
+
+Provider credentials are environment variables the engine reads. On Windows the engine sees the variables of your user account. To use a dotenv file, set it under Settings.
+
+Chat is optional. Choose a backend under Settings and paste an API key, which goes to the operating system keychain. Without a backend the chat pane is hidden and the rest works as before.
+
 ## Repository layout
 
-The intended layout is shown below.
+The layout is shown below.
 
 ```
 stackql-workbench/
   src/                  webview (React)
-    panes/              explorer, editor, results, chat, activity, settings
     host/               typed wrappers over IPC
+    lib/                pure logic with tests
+    state/              hooks that connect the host to the panes
+    panes/              explorer, editor, results, chat, activity, settings, statusbar
+    ui/                 small shared components
   src-tauri/            host (Rust)
     src/
       engine/           discovery, supervisor, process lifecycle
       connection/       Connection trait, LocalConnection
-      query/            pg wire client, row streaming, cancel
-      agent/            MCP client, InferenceBackend trait, backends, loop
+      query/            pg wire client, statement splitting, results
+      agent/            MCP client, approvals, InferenceBackend trait, backends, loop
       secrets/          keychain access
-      config/           settings and workspaces
+      activity/         operator history and the engine audit log
+      icons/            provider icons
+      config/           settings
       ipc/              command and event definitions
+    examples/           the probes behind the spike reports
+    tests/              integration tests against a real stackql
   docs/                 design notes and spike reports
 ```
 
+What the engine actually does on each channel is recorded in [docs/spike-pgwire.md](docs/spike-pgwire.md) and [docs/spike-mcp.md](docs/spike-mcp.md).
+
 ## Roadmap
 
-Milestones are delivered in order. Each one leaves the app in a usable state.
+Milestones are delivered in order where they depend on each other. Each one leaves the app in a usable state. M0 is done, and the core of M3 was built ahead of M1 and M2 so that both the IDE and chat could be tried together.
 
 | Milestone | Scope |
 |---|---|

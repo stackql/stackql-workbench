@@ -8,7 +8,20 @@ StackQL Workbench is the desktop UI for [StackQL](https://github.com/stackql/sta
 
 ## Status
 
-Pre-alpha. M0 (foundations) has landed: engine discovery and supervision, the pg wire query service, the explorer, one editor buffer and the results grid, on Windows. The macOS code paths compile and the process supervision is tested on Linux, but nothing has been run on macOS yet. Update this line when a milestone lands. The roadmap is in `README.md`.
+Pre-alpha. Two milestones have landed on Windows.
+
+- M0, foundations: engine discovery and supervision, the pg wire query service, the explorer, one editor buffer and the results grid.
+- The core of M3, chat: the MCP client with approvals, the agent loop, the activity pane, and API key backends for Gemini, Anthropic and OpenAI-compatible servers. Anthropic and OpenAI-compatible were M4 items and came along because the backend interface made them cheap.
+
+Not started: M1 (tabs, completion, saved files, export), M2 (packaging), plan sign-in and delegated agents. Replies are not streamed yet.
+
+What has and has not been run:
+
+- Everything has been run on Windows 11 x64 against `stackql` v1.0.888.
+- Nothing has been run on macOS. The process supervision code for Unix is tested on Linux. The rest of the macOS-only code, the keychain store among it, has only been written.
+- No backend has been run against a real inference provider. Each is tested against a local stub that checks what goes on the wire, and the loop is tested against a real `stackql mcp` with a scripted model.
+
+Update this section when a milestone lands. The roadmap is in `README.md`.
 
 ## Architecture rules
 
@@ -39,8 +52,8 @@ These are the chosen defaults. Check the current stable version and API of each 
 | Results grid | TanStack Table with TanStack Virtual |
 | Styling | Tailwind CSS |
 | pg wire client | `tokio-postgres` |
-| MCP client | `rmcp` (the official Rust MCP SDK) |
-| Secrets | OS keychain through the `keyring` crate |
+| MCP client | `rmcp` (the official Rust MCP SDK), client and async read-write transport only |
+| Secrets | OS keychain through `keyring-core` with the Windows and Apple native stores |
 | Package manager | npm |
 | Webview tests | Vitest with jsdom |
 | Lint and format | ESLint with typescript-eslint, Prettier, rustfmt, clippy |
@@ -48,37 +61,41 @@ These are the chosen defaults. Check the current stable version and API of each 
 | Clipboard | `arboard`, write only, through a host command |
 | HTTPS client | `reqwest` with the OS TLS stack (`native-tls`) |
 
-The MCP client library must support the client side of elicitation and protocol revision negotiation. Confirm that before committing to it.
+The MCP client library must support the client side of elicitation and protocol revision negotiation. `rmcp` 3.11 does both. That was confirmed against the real engine and is recorded in `docs/spike-mcp.md`.
+
+The `keyring` crate is now a thin layer over `keyring-core` plus one store crate per platform. The host depends on those directly and installs the platform store at startup.
 
 Version constraints found while building M0:
 
 - Rust 1.90 or later. Current Tauri 2 releases need it. Use rustup's stable toolchain, the same one CI uses.
 - TypeScript is pinned to 6.0.x. TypeScript 7 ships no compiler API, and typescript-eslint supports up to 6.0. Move to 7 when typescript-eslint does.
 - TanStack Table is v9. Its API differs from v8: `useTable`, and features are registered with `tableFeatures`.
+- `rmcp` needs Rust 1.88 or later, which the Tauri requirement already covers.
 
 ## Repository layout
 
-The layout is below. Keep it current as the code lands. Directories marked "planned" do not exist yet.
+The layout is below. Keep it current as the code lands.
 
 ```
 stackql-workbench/
   src/                  webview (React)
     host/               typed wrappers over IPC, the only Tauri imports
-    lib/                pure logic with tests: result state, cell content, explorer tree
+    lib/                pure logic with tests: results, cells, explorer tree, chat, activity
     state/              hooks that connect the host to the panes
-    panes/              explorer, editor, results, statusbar, settings (chat, activity planned)
+    panes/              explorer, editor, results, chat, activity, settings, statusbar
     ui/                 small shared components
   src-tauri/            host (Rust)
     src/
       engine/           discovery, port selection, supervisor, job object, watchdog
-      connection/       Connection trait, LocalConnection
+      connection/       Connection trait, LocalConnection, safety mode, agent channel
       query/            pg wire session, statement splitting, results, explorer statements
-      config/           settings
+      agent/            MCP client, approvals, InferenceBackend trait, backends, loop
+      secrets/          keychain access
+      activity/         operator history, engine audit log reader
       icons/            provider icon lookup, fetch and cache
+      config/           settings
       ipc/              command and event definitions
-      agent/            planned: MCP client, InferenceBackend trait, backends, loop
-      secrets/          planned: keychain access
-    examples/           pgwire_spike, the probe behind docs/spike-pgwire.md
+    examples/           pgwire_spike and mcp_spike, the probes behind the spike reports
     tests/              integration tests against a real stackql
   scripts/              test launcher
   docs/                 design notes and spike reports
@@ -110,6 +127,7 @@ npm run format                              format the webview sources
 npm run tauri build -- --no-bundle          release build of the executable, no installer
 npm run tauri build -- --debug --no-bundle  the debug build CI runs
 cd src-tauri && cargo run --example pgwire_spike   rerun the pg wire probe
+cd src-tauri && cargo run --example mcp_spike      rerun the MCP probe
 ```
 
 Things to know about them:
@@ -118,7 +136,9 @@ Things to know about them:
 - `npm test` goes through `scripts/test.js`. Vitest fails on Windows when the working directory is spelled with a lower-case drive letter, which an editor terminal can do. The launcher corrects that.
 - `cargo test` includes integration tests that start a real `stackql`. They are skipped, with a note on stderr, when no binary is found. They need no credentials and no network.
 - The release executable is `src-tauri/target/release/stackql-workbench.exe` on Windows.
-- The engine's `--approot` is `<app data dir>/engine`. On Windows that is `%APPDATA%\io.stackql.workbench\engine`. Settings are in `<app config dir>/settings.json`.
+- The engine's `--approot` is `<app data dir>/engine`. On Windows that is `%APPDATA%\io.stackql.workbench\engine`. Settings are in `<app config dir>/settings.json`. The agent audit log is in `<app data dir>/audit` and the operator's statement history in `<app data dir>/history.jsonl`.
+- One test writes and removes a throwaway entry in the real OS keychain. It skips itself where no keychain can be opened.
+- An editor's language server can build in the same `target` directory and hold a file the build needs, which shows up as linker error `LNK1104` on Windows. Running the command again clears it.
 
 ## Engine interface
 
@@ -181,12 +201,29 @@ How the host uses it:
 
 ### `stackql mcp` (agent channel)
 
-Only the agent runtime uses this channel.
+Only the agent runtime uses this channel. Every point below was tested. See `docs/spike-mcp.md`.
 
-- Always pass `--mcp.server.type=stdio`. The default transport is HTTP.
-- Configuration is inline JSON through `--mcp.config`. This app sets `server.mode`, `server.render` and `server.audit.file.dir`.
-- The audit log is on by default and writes JSONL. Set `server.audit.file.dir` to the app data directory, otherwise the log lands in the working directory. The activity pane reads this log.
-- Ask for JSON results, either per call with `format: "json"` or with `server.render: "json"`, so agent results render in the same grid as editor results.
+How the host starts it:
+
+- `--mcp.server.type=stdio`, always. The default transport is HTTP.
+- `--approot` with the same directory `srv` uses, and `--env.file` when the operator has set a credentials file.
+- Configuration is inline JSON through `--mcp.config`. The host sets `server.transport`, `server.mode`, `server.request_timeout` and `server.audit`.
+- `server.audit.file.dir` is a directory under the app data directory, otherwise the log lands in the working directory. The log is JSONL, one record per tool call, one file per server start. The activity pane reads it.
+- `server.request_timeout` is raised from its 30 second default, which a paged provider query can exceed.
+
+How the server behaves:
+
+- Every protocol revision the SDK offers is negotiated. The host offers `2025-11-25`, the newest one with an `initialize` handshake. On it the approval prompt is a server-initiated elicitation, the simpler of the two approval flows.
+- 15 tools. Each result carries rendered text for the model and a structured payload. Row results are `{ "rows": [...] }`, which the host turns into a table for the grid. Nothing needs to be set to get JSON: the structured payload is always there.
+- The handshake returns about 25,000 characters of guidance for the model. The host puts it in the system prompt.
+- An upstream provider failure is reported to the model as an empty result with no error. The reason is only on the server's stderr. The host watches stderr during each tool call and adds a note for the operator and for the model.
+- A statement the server cannot parse is classed `unknown` and asks for approval, even through the read tool.
+- The server exits when its stdin closes.
+
+How the host uses it:
+
+- The connection supplies the two byte streams. The agent runtime never spawns the process itself, and the supervisor owns it like any other child.
+- One session is kept per safety mode. Changing the mode opens a new session, because the mode is fixed when the server starts.
 
 The workspace safety setting maps directly onto `server.mode`.
 
@@ -198,6 +235,8 @@ The workspace safety setting maps directly onto `server.mode`.
 | `full_access` | allow | allow | allow | allow |
 
 "Needs approval" is implemented with MCP elicitation. The host's MCP client must advertise the elicitation capability, otherwise gated tools are refused. The approval card in the UI is the answer to the server's `elicitation/create` request. Show the exact SQL on the card. Never auto-accept.
+
+The request is a form with no fields. Its message holds the tool, the query class and the SQL. The host waits for the operator for as long as it takes. With nobody listening the answer is decline, and stopping the turn answers cancel.
 
 ### Credentials
 
@@ -216,6 +255,22 @@ Backends are built in this order.
 1. API key. Gemini first because it works on the free tier, then Anthropic, OpenAI and any OpenAI-compatible base URL, which covers local inference. The host runs the loop and owns the MCP client.
 2. ChatGPT plan sign-in through OpenAI's Sign in with ChatGPT programme. This needs a client ID issued to this project. Do not start it until the maintainer confirms the client ID exists.
 3. Delegated. An ACP agent that the operator has installed and signed in to themselves, for example Claude Code through its ACP adapter. In this mode the agent is the MCP client and spawns its own `stackql mcp`. Start that process in `read_only` until the agent's elicitation handling is verified.
+
+What exists now, all of it under item 1:
+
+| Backend | API | Default model | Notes |
+|---|---|---|---|
+| Gemini | `generateContent` | `gemini-4-hydrogen` | The model's reply is kept and sent back untouched, because function calls carry a signature that must be returned in place |
+| Anthropic | Messages API over REST, since there is no official Rust SDK | `claude-opus-5-5` | Thinking blocks are returned untouched. For models that support it, server-side fallback on a declined request is switched on |
+| OpenAI-compatible | Chat Completions | none, the operator names it | Covers local inference. Some of OpenAI's newest models take tool calls only through its Responses API, which is not implemented |
+
+How they are built:
+
+- A backend turns the shared conversation into one request and the reply back into text and tool calls. It holds no state. The loop, the MCP client and the approval flow are the same for all of them.
+- Each keeps the provider's own form of a reply and replays it as it was. Do not rebuild a reply from its parsed parts.
+- No sampling parameters are sent. Current models from all three providers ignore or reject them.
+- Replies are not streamed. A turn shows progress per tool call.
+- The API key is read from the keychain when a turn starts. Settings hold the backend, the model and the address, never the key.
 
 These rules hold for every backend.
 
@@ -265,5 +320,12 @@ Raise these with the maintainer when the work reaches them. Do not decide them a
 - Signing and notarisation identities for the Windows executable and the macOS app bundle.
 - Whether `srv` should later co-host the MCP server so the IDE and the agent share one engine session.
 - Whether loopback pg wire needs TLS with a per-launch client certificate.
+
+These came out of the two spikes and need an answer from the engine side.
+
+- `srv` has no cancel. It needs to send `BackendKeyData` and handle a cancel request before M1 can offer more than "stop waiting".
+- `srv` runs only the first statement in a message, and cuts at a semicolon inside a string literal.
+- An upstream provider failure is an empty, successful result on both channels. On the agent channel a model reasons from it.
+- Row objects from the MCP server lose the column order of the statement.
 
 The licence is decided: MIT, the same as `stackql`.

@@ -70,7 +70,7 @@ export function ChatPane({
     <div className="flex h-full min-h-0 flex-col bg-surface-alt">
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line px-2">
         <span className="min-w-0 truncate text-ink-muted" title="Inference backend and model">
-          {inference ? `${BACKEND_LABEL[inference.kind] ?? inference.kind} · ${model}` : ''}
+          {inference ? `${BACKEND_LABEL[inference.kind] ?? inference.kind}, ${model}` : ''}
         </span>
         <span className="flex-1" />
         <label className="flex shrink-0 items-center gap-1 text-ink-muted">
