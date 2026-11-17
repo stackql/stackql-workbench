@@ -1,11 +1,17 @@
 import { useCallback, useRef, useState } from 'react';
 import { host } from './host';
+import type { ToolItem } from './lib/chat';
+import { agentRun, type RunState } from './lib/results';
+import { ActivityPane } from './panes/activity/ActivityPane';
+import { ChatPane } from './panes/chat/ChatPane';
 import { Editor, type EditorHandle } from './panes/editor/Editor';
 import { Explorer } from './panes/explorer/Explorer';
 import { Results } from './panes/results/Results';
+import { ChatSettings } from './panes/settings/ChatSettings';
 import { SettingsDialog } from './panes/settings/SettingsDialog';
 import { EngineBanner } from './panes/statusbar/EngineBanner';
 import { StatusBar } from './panes/statusbar/StatusBar';
+import { useAgent, type AgentResult } from './state/useAgent';
 import { useEngineStatus } from './state/useEngineStatus';
 import { useQueryRun } from './state/useQueryRun';
 import { Play } from './ui/icons';
@@ -35,6 +41,26 @@ const RUN_SHORTCUT = IS_MAC ? 'Cmd+Enter' : 'Ctrl+Enter';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+type SidePane = 'chat' | 'activity';
+
+function resultRun(result: {
+  callId: string;
+  tool: string;
+  sql: string | null;
+  table: AgentResult['table'];
+  engineNotes: string[];
+  elapsedMs: number;
+}): RunState {
+  return agentRun(
+    `agent-${result.callId}`,
+    result.sql ?? result.tool,
+    result.table.columns,
+    result.table.rows,
+    result.elapsedMs,
+    result.engineNotes,
+  );
+}
+
 export function App() {
   const status = useEngineStatus();
   const query = useQueryRun();
@@ -42,21 +68,48 @@ export function App() {
 
   const [explorerWidth, setExplorerWidth] = useState(280);
   const [editorHeight, setEditorHeight] = useState(240);
+  const [sideWidth, setSideWidth] = useState(420);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [explorerToken, setExplorerToken] = useState(0);
   const [initialText] = useState(savedEditorText);
+  // Null means "follow the configuration": chat when it is set up.
+  const [sidePaneChoice, setSidePaneChoice] = useState<SidePane | 'none' | null>(null);
+  // A result the assistant produced, shown in the grid until the operator runs something.
+  const [agentResult, setAgentResult] = useState<RunState | null>(null);
+  const [runsEnded, setRunsEnded] = useState(0);
+
+  const showAgentResult = useCallback((result: AgentResult) => {
+    // Results with no columns have nothing to put in a grid.
+    if (result.table.columns.length > 0) {
+      setAgentResult(resultRun(result));
+    }
+    // Installing a provider changes what the explorer should show.
+    if (result.tool === 'pull_provider') {
+      setExplorerToken((token) => token + 1);
+    }
+  }, []);
+  const agent = useAgent(showAgentResult);
 
   const engineRunning = status.state === 'running';
   const running = query.state.running;
   const { run: runQuery, stopWaiting } = query;
+  const chatAvailable = agent.config?.inference != null;
+  const sidePane: SidePane | null =
+    sidePaneChoice === 'none'
+      ? null
+      : sidePaneChoice === 'chat' && !chatAvailable
+        ? null
+        : (sidePaneChoice ?? (chatAvailable ? 'chat' : null));
 
   const run = useCallback(
     (sql: string) => {
       if (running || sql.trim() === '') {
         return;
       }
+      setAgentResult(null);
       void runQuery(sql).then((summary) => {
+        setRunsEnded((count) => count + 1);
         // Installing a provider changes what the explorer should show.
         if (summary && summary.completed > 0 && /\bregistry\s+pull\b/i.test(sql)) {
           setExplorerToken((token) => token + 1);
@@ -83,6 +136,35 @@ export function App() {
       // Storage is a convenience. Losing it is not worth interrupting anyone.
     }
   }, []);
+
+  // Statements from the assistant or from the activity list go into the
+  // editor as text. Nothing runs until the operator runs it.
+  const openInEditor = useCallback((sql: string) => {
+    const statement = sql.trim();
+    editor.current?.insert(`\n${statement}${statement.endsWith(';') ? '' : ';'}\n`);
+  }, []);
+
+  const showTable = useCallback((item: ToolItem) => {
+    if (item.table) {
+      setAgentResult(
+        resultRun({
+          callId: item.callId,
+          tool: item.tool,
+          sql: item.sql,
+          table: item.table,
+          engineNotes: item.engineNotes,
+          elapsedMs: item.elapsedMs ?? 0,
+        }),
+      );
+    }
+  }, []);
+
+  const toggleSidePane = useCallback(
+    (pane: SidePane) => {
+      setSidePaneChoice(sidePane === pane ? 'none' : pane);
+    },
+    [sidePane],
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -142,9 +224,42 @@ export function App() {
             }}
           />
           <div className="min-h-0 flex-1">
-            <Results run={query.state} onStopWaiting={stopWaiting} />
+            <Results run={agentResult ?? query.state} onStopWaiting={stopWaiting} />
           </div>
         </div>
+
+        {sidePane !== null && (
+          <>
+            <Splitter
+              orientation="vertical"
+              label="Resize side pane"
+              onResize={(delta) => {
+                setSideWidth((width) => clamp(width - delta, 280, 900));
+              }}
+            />
+            <div className="shrink-0" style={{ width: sideWidth }}>
+              {sidePane === 'chat' && agent.config ? (
+                <ChatPane
+                  config={agent.config}
+                  chat={agent.chat}
+                  engineRunning={engineRunning}
+                  onSend={agent.send}
+                  onStop={agent.stop}
+                  onReset={agent.reset}
+                  onAnswer={agent.answer}
+                  onSafetyMode={agent.setSafetyMode}
+                  onOpenInEditor={openInEditor}
+                  onShowTable={showTable}
+                />
+              ) : (
+                <ActivityPane
+                  refreshToken={runsEnded + agent.turnsEnded}
+                  onOpenInEditor={openInEditor}
+                />
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       <StatusBar
@@ -154,6 +269,9 @@ export function App() {
         onOpenSettings={() => {
           setSettingsOpen(true);
         }}
+        sidePane={sidePane}
+        chatAvailable={chatAvailable}
+        onToggleSidePane={toggleSidePane}
       />
 
       {settingsOpen && (
@@ -162,7 +280,20 @@ export function App() {
           onClose={() => {
             setSettingsOpen(false);
           }}
-        />
+        >
+          {agent.config && (
+            <ChatSettings
+              config={agent.config}
+              onChanged={(next) => {
+                agent.setConfig(next);
+                // A newly configured chat should be visible.
+                if (next.inference) {
+                  setSidePaneChoice('chat');
+                }
+              }}
+            />
+          )}
+        </SettingsDialog>
       )}
     </div>
   );

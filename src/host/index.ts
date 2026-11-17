@@ -4,9 +4,14 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
+  Activity,
+  AgentConfig,
+  AgentEvent,
+  ApprovalDecision,
   EngineStatus,
   Field,
   HostError,
+  InferenceSettings,
   Method,
   MethodField,
   Provider,
@@ -14,9 +19,11 @@ import type {
   QueryEvent,
   Resource,
   RunSummary,
+  SafetyMode,
   Service,
   Settings,
   SettingsView,
+  TurnSummary,
 } from './types';
 
 export type * from './types';
@@ -74,6 +81,45 @@ export const host = {
    */
   providerIcons: (providers: string[]) =>
     invoke<Record<string, ProviderIcon>>('provider_icons', { providers }),
+
+  agent: {
+    config: () => invoke<AgentConfig>('agent_config_get'),
+
+    /**
+     * Saves the chat backend. A key, when given, goes to the OS keychain.
+     * Leaving it out keeps the key that is already stored.
+     */
+    saveConfig: (inference: InferenceSettings, apiKey: string | null) =>
+      invoke<AgentConfig>('agent_config_save', { inference, apiKey }),
+
+    /** Removes the chat backend and its stored key. */
+    clearConfig: () => invoke<AgentConfig>('agent_config_clear'),
+
+    setSafetyMode: (mode: SafetyMode) => invoke<SafetyMode>('agent_set_safety_mode', { mode }),
+
+    /**
+     * Sends a message to the assistant. Events arrive through `onEvent`
+     * while the returned promise is pending.
+     */
+    send(text: string, onEvent: (event: AgentEvent) => void): Promise<TurnSummary> {
+      const channel = new Channel<AgentEvent>();
+      channel.onmessage = onEvent;
+      return invoke<TurnSummary>('agent_send', { text, onEvent: channel });
+    },
+
+    /** Delivers the operator's answer to an approval prompt. */
+    approve: (approvalId: string, decision: ApprovalDecision) =>
+      invoke<boolean>('agent_approve', { approvalId, decision }),
+
+    /** Stops the running turn. A statement already started is not interrupted. */
+    stop: () => invoke<boolean>('agent_stop'),
+
+    /** Starts a new conversation. */
+    reset: () => invoke('agent_reset'),
+  },
+
+  /** What was run recently, by the operator and by the agent. */
+  activity: (limit?: number) => invoke<Activity>('activity_list', { limit }),
 
   explorer: {
     providers: () => invoke<Provider[]>('explorer_providers'),

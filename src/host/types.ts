@@ -17,11 +17,28 @@ export interface EngineStatus {
   logTail: string[];
 }
 
+/** What the agent may do without asking. The engine enforces it. */
+export type SafetyMode = 'read_only' | 'safe' | 'delete_safe' | 'full_access';
+
+export type BackendKind = 'gemini' | 'anthropic' | 'openai_compatible';
+
+/** Which model the chat uses. The API key is never part of this. */
+export interface InferenceSettings {
+  kind: BackendKind;
+  /** Empty means the backend's default model. */
+  model: string;
+  /** Null means the backend's default address. */
+  baseUrl: string | null;
+}
+
 export interface Settings {
   /** Explicit location of the stackql binary. Null means search for it. */
   enginePath: string | null;
   /** A dotenv file the engine sources at startup. The app never reads it. */
   envFile: string | null;
+  safetyMode: SafetyMode;
+  /** Null means chat is not configured. */
+  inference: InferenceSettings | null;
 }
 
 export interface SettingsView {
@@ -119,4 +136,118 @@ export interface MethodField {
   paramType: string;
   shape: string;
   description: string;
+}
+
+export interface BackendOption {
+  kind: BackendKind;
+  defaultModel: string;
+  defaultBaseUrl: string;
+  /** A local server usually needs no key. */
+  keyOptional: boolean;
+}
+
+/** What the webview may know about the chat setup. Never the key itself. */
+export interface AgentConfig {
+  /** Null means chat is not configured, and the chat pane stays hidden. */
+  inference: InferenceSettings | null;
+  hasKey: boolean;
+  safetyMode: SafetyMode;
+  backends: BackendOption[];
+  /** False when keys cannot be kept in the OS keychain on this machine. */
+  keychainAvailable: boolean;
+}
+
+/** The engine asks the operator before it runs something. */
+export interface ApprovalRequest {
+  id: string;
+  /** The engine's message, exactly as sent. */
+  message: string;
+  tool: string | null;
+  /** The engine's classification, for example mutation_delete. */
+  queryClass: string | null;
+  /** The exact SQL. */
+  sql: string | null;
+}
+
+export type ApprovalDecision = 'accept' | 'decline' | 'cancel';
+
+/** A row result from a tool, in the shape the grid uses. */
+export interface AgentTable {
+  columns: string[];
+  rows: Row[];
+  /** Rows the tool returned, which can be more than were sent on. */
+  totalRows: number;
+  truncated: boolean;
+}
+
+export type AgentEvent =
+  | {
+      event: 'sessionStarted';
+      data: { mode: SafetyMode; protocolVersion: string; tools: number };
+    }
+  | { event: 'assistantText'; data: { text: string } }
+  | {
+      event: 'toolCallStarted';
+      data: { id: string; tool: string; arguments: unknown; sql: string | null };
+    }
+  | { event: 'approvalRequested'; data: { request: ApprovalRequest } }
+  | {
+      event: 'toolCallFinished';
+      data: {
+        id: string;
+        isError: boolean;
+        text: string;
+        table: AgentTable | null;
+        /** Provider API failures the engine reported while the tool ran. */
+        engineNotes: string[];
+        elapsedMs: number;
+      };
+    }
+  | { event: 'notice'; data: { message: string } };
+
+export type StopReason =
+  | { kind: 'endTurn' }
+  | { kind: 'toolUse' }
+  | { kind: 'maxTokens' }
+  | { kind: 'refused'; detail: string }
+  | { kind: 'other'; detail: string };
+
+export interface TurnSummary {
+  /** Calls made to the model. */
+  steps: number;
+  toolCalls: number;
+  /** The operator stopped the turn. */
+  stopped: boolean;
+  stop: StopReason;
+  usage: { inputTokens: number | null; outputTokens: number | null };
+}
+
+/** One statement the operator ran. */
+export interface HistoryEntry {
+  timestampMs: number;
+  sql: string;
+  /** ok, error or abandoned. */
+  outcome: string;
+  rows: number | null;
+  elapsedMs: number;
+  error: string | null;
+}
+
+/** One record from the engine's agent audit log. */
+export interface AuditRecord {
+  /** RFC 3339. */
+  timestamp: string;
+  tool: string;
+  mode: string;
+  /** For example allow, refuse_immediate or needs_approval_declined. */
+  decision: string;
+  queryClass: string;
+  sql: string | null;
+  durationMs: number | null;
+  error: string | null;
+}
+
+export interface Activity {
+  operator: HistoryEntry[];
+  agent: AuditRecord[];
 }

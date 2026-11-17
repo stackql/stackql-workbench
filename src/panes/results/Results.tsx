@@ -91,6 +91,14 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
         )}
 
         <span className="flex-1" />
+        {run.origin === 'agent' && (
+          <span
+            className="rounded-sm bg-brand px-1 text-[10px] font-semibold text-on-brand"
+            title="This result came from a statement the assistant ran"
+          >
+            Assistant
+          </span>
+        )}
         <RunStatus run={run} statement={statement} onStopWaiting={onStopWaiting} />
         {hasGrid && tab === 'results' && (
           <IconButton

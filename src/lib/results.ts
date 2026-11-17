@@ -23,6 +23,8 @@ export interface StatementResult {
 
 export interface RunState {
   runId: string | null;
+  /** Who produced it: the operator from the editor, or the assistant. */
+  origin: 'operator' | 'agent';
   running: boolean;
   /** Statements found in the text. Known once the first one starts. */
   total: number;
@@ -34,6 +36,7 @@ export interface RunState {
 
 export const emptyRun: RunState = {
   runId: null,
+  origin: 'operator',
   running: false,
   total: 0,
   statements: [],
@@ -73,6 +76,36 @@ function update(
     ...state,
     statements: state.statements.map((s) => (s.index === index ? change(s) : s)),
   };
+}
+
+/**
+ * A finished run made from a row result the assistant produced, so that it
+ * shows in the same grid as the operator's own results.
+ */
+export function agentRun(
+  id: string,
+  sql: string,
+  columns: string[],
+  rows: Row[],
+  elapsedMs: number,
+  engineNotes: string[],
+): RunState {
+  const statement: StatementResult = {
+    ...newStatement(0, sql),
+    status: 'done',
+    columns,
+    rows,
+    rowCount: rows.length,
+    elapsedMs,
+    // Shown the same way as an upstream failure on the operator's channel.
+    notices: engineNotes.map((note) => ({
+      severity: 'NOTICE',
+      code: '',
+      message: note,
+      detail: note,
+    })),
+  };
+  return { ...emptyRun, runId: id, origin: 'agent', total: 1, statements: [statement] };
 }
 
 /** Applies one host event. */
