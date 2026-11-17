@@ -38,6 +38,16 @@ tokio-postgres = "0.7"
 futures-util = "0.3"
 # Text only. The default feature adds image support, which is not used.
 arboard = { version = "3", default-features = false }
+# HTTPS client. native-tls uses the TLS stack and trust store of the OS, which
+# avoids the extra build tools the default rustls provider needs on Windows.
+reqwest = { version = "0.13", default-features = false, features = [
+  "native-tls",
+  "http2",
+  "system-proxy",
+  "json",
+  "charset",
+] }
+base64 = "0.23"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

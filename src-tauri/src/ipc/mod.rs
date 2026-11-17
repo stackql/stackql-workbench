@@ -3,6 +3,7 @@
 //! This is the whole surface between the webview and the host. The webview
 //! side is `src/host/`, the only place in the webview that touches Tauri.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tauri::State;
@@ -11,6 +12,7 @@ use tauri::ipc::Channel;
 use crate::config::{Settings, SettingsStore};
 use crate::connection::{Connection, EngineStatus, EventSink};
 use crate::error::{HostError, HostResult};
+use crate::icons::{ProviderIcon, ProviderIcons};
 use crate::query::explorer::{self, Field, Method, MethodField, Provider, Resource, Service};
 use crate::query::result::{QueryEvent, RunSummary};
 
@@ -20,6 +22,7 @@ pub const ENGINE_STATUS_EVENT: &str = "engine-status";
 pub struct AppState {
     pub connection: Arc<dyn Connection>,
     pub settings: Arc<SettingsStore>,
+    pub icons: Arc<ProviderIcons>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -96,6 +99,16 @@ pub fn clipboard_write_text(text: String) -> HostResult<()> {
     clipboard
         .set_text(text)
         .map_err(|err| HostError::Internal(format!("Could not copy to the clipboard: {err}")))
+}
+
+/// Icons for the named providers, as `data:` URLs. Providers without an icon
+/// are left out, and the explorer shows its letter badge for them.
+#[tauri::command]
+pub async fn provider_icons(
+    state: State<'_, AppState>,
+    providers: Vec<String>,
+) -> HostResult<HashMap<String, ProviderIcon>> {
+    Ok(state.icons.icons(&providers).await)
 }
 
 #[tauri::command]

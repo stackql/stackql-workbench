@@ -76,6 +76,15 @@ export interface Provider {
   version: string;
 }
 
+export interface ProviderIcon {
+  /** The image as a data: URL. */
+  dataUrl: string;
+  /** The icon is dark on a transparent background and needs inverting on a dark surface. */
+  invertOnDark: boolean;
+  /** For example "Amazon Web Services". */
+  displayName: string;
+}
+
 export interface Service {
   name: string;
   id: string;

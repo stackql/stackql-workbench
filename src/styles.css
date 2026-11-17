@@ -119,6 +119,13 @@
   background: transparent;
 }
 
+/* Icons drawn dark on a transparent background disappear on a dark surface. */
+@media (prefers-color-scheme: dark) {
+  .wb-invert-on-dark {
+    filter: invert(1);
+  }
+}
+
 @keyframes wb-spin {
   to {
     transform: rotate(360deg);

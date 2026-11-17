@@ -7,3 +7,5 @@ src-tauri/gen/
 src-tauri/icons/
 # Authored docs keep their own layout.
 *.md
+# A verbatim copy of an upstream file.
+src-tauri/src/icons/providers.snapshot.json

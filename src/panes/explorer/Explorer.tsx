@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { host, toHostError } from '../../host';
+import { host, toHostError, type ProviderIcon } from '../../host';
 import { copyText } from '../../host/clipboard';
 import {
   loadChildren,
@@ -38,6 +38,7 @@ export function Explorer({ engineRunning, refreshToken, onInsert }: ExplorerProp
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [children, setChildren] = useState<ReadonlyMap<string, ChildState>>(new Map());
   const [copied, setCopied] = useState<string | null>(null);
+  const [icons, setIcons] = useState<Record<string, ProviderIcon>>({});
   const [manualRefresh, setManualRefresh] = useState(0);
   // Guards against a slow response from before a refresh landing after it.
   const generation = useRef(0);
@@ -54,9 +55,22 @@ export function Explorer({ engineRunning, refreshToken, onInsert }: ExplorerProp
       setChildren(new Map());
       try {
         const nodes = await loadChildren(null, host.explorer);
-        if (generation.current === mine) {
-          setRoots({ status: 'loaded', nodes });
+        if (generation.current !== mine) {
+          return;
         }
+        setRoots({ status: 'loaded', nodes });
+        // Icons arrive after the tree, so a slow or failed lookup never
+        // holds the tree up. Until then, and for any provider without an
+        // icon, the letter badge is shown.
+        const names = nodes.map((node) => node.path.provider);
+        host.providerIcons(names).then(
+          (found) => {
+            if (generation.current === mine) {
+              setIcons(found);
+            }
+          },
+          () => undefined,
+        );
       } catch (error) {
         if (generation.current === mine) {
           setRoots({ status: 'error', message: toHostError(error).message });
@@ -158,6 +172,7 @@ export function Explorer({ engineRunning, refreshToken, onInsert }: ExplorerProp
               <TreeRow
                 key={row.node.id}
                 row={row}
+                icon={row.node.kind === 'provider' ? icons[row.node.path.provider] : undefined}
                 copied={copied === row.node.id}
                 onToggle={toggle}
                 onCopy={copy}
@@ -182,13 +197,15 @@ export function Explorer({ engineRunning, refreshToken, onInsert }: ExplorerProp
 
 interface TreeRowProps {
   row: VisibleRow;
+  /** The provider's own icon, when one could be resolved. */
+  icon: ProviderIcon | undefined;
   copied: boolean;
   onToggle: (node: TreeNode) => void;
   onCopy: (node: TreeNode) => void;
   onInsert: (text: string) => void;
 }
 
-function TreeRow({ row, copied, onToggle, onCopy, onInsert }: TreeRowProps) {
+function TreeRow({ row, icon, copied, onToggle, onCopy, onInsert }: TreeRowProps) {
   const { node, depth, expanded, state } = row;
   const badge = KIND_BADGE[node.kind];
   const indent = 6 + depth * 14;
@@ -201,7 +218,12 @@ function TreeRow({ row, copied, onToggle, onCopy, onInsert }: TreeRowProps) {
         aria-expanded={node.expandable ? expanded : undefined}
         aria-selected={false}
         tabIndex={0}
-        title={node.title}
+        title={
+          icon
+            ? `${icon.displayName}
+${node.title}`
+            : node.title
+        }
         className="group flex h-[22px] cursor-default items-center gap-1 pr-1 hover:bg-surface-sunken"
         style={{ paddingLeft: indent }}
         onClick={() => {
@@ -234,13 +256,24 @@ function TreeRow({ row, copied, onToggle, onCopy, onInsert }: TreeRowProps) {
             )
           ) : null}
         </span>
-        {badge.text !== '' && (
-          <span
-            aria-label={badge.label}
-            className={`flex h-4 min-w-4 shrink-0 items-center justify-center rounded-sm px-0.5 text-[9px] font-bold ${badge.className}`}
-          >
-            {badge.text}
-          </span>
+        {icon ? (
+          <img
+            src={icon.dataUrl}
+            alt=""
+            width={16}
+            height={16}
+            draggable={false}
+            className={`h-4 w-4 shrink-0 object-contain ${icon.invertOnDark ? 'wb-invert-on-dark' : ''}`}
+          />
+        ) : (
+          badge.text !== '' && (
+            <span
+              aria-label={badge.label}
+              className={`flex h-4 min-w-4 shrink-0 items-center justify-center rounded-sm px-0.5 text-[9px] font-bold ${badge.className}`}
+            >
+              {badge.text}
+            </span>
+          )
         )}
         <span className="truncate">{node.label}</span>
         {node.detail !== '' && (

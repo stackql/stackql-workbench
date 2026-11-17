@@ -7,6 +7,7 @@ pub mod config;
 pub mod connection;
 pub mod engine;
 pub mod error;
+pub mod icons;
 pub mod ipc;
 pub mod query;
 pub mod util;
@@ -18,11 +19,13 @@ use tauri::{Emitter, Manager, RunEvent};
 use crate::config::SettingsStore;
 use crate::connection::Connection;
 use crate::connection::local::LocalConnection;
+use crate::icons::ProviderIcons;
 use crate::ipc::AppState;
 
 fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let config_dir = app.path().app_config_dir()?;
     let data_dir = app.path().app_data_dir()?;
+    let cache_dir = app.path().app_cache_dir()?;
 
     let settings = Arc::new(SettingsStore::load(config_dir.join("settings.json")));
     // The engine's provider cache lives under the app data directory. Its
@@ -54,6 +57,7 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(AppState {
         connection,
         settings,
+        icons: Arc::new(ProviderIcons::new(cache_dir.join("provider-icons"))),
     });
     Ok(())
 }
@@ -70,6 +74,7 @@ pub fn run() {
             ipc::query_run,
             ipc::query_abandon,
             ipc::clipboard_write_text,
+            ipc::provider_icons,
             ipc::explorer_providers,
             ipc::explorer_services,
             ipc::explorer_resources,

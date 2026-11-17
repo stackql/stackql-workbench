@@ -10,6 +10,7 @@ import type {
   Method,
   MethodField,
   Provider,
+  ProviderIcon,
   QueryEvent,
   Resource,
   RunSummary,
@@ -66,6 +67,13 @@ export const host = {
 
   /** Stops waiting for a run. The engine has no cancel. */
   abandonQuery: (runId: string) => invoke<boolean>('query_abandon', { runId }),
+
+  /**
+   * Icons for the named providers, keyed by provider name. A provider with no
+   * icon is absent from the result.
+   */
+  providerIcons: (providers: string[]) =>
+    invoke<Record<string, ProviderIcon>>('provider_icons', { providers }),
 
   explorer: {
     providers: () => invoke<Provider[]>('explorer_providers'),
