@@ -25,6 +25,7 @@ import {
   Warning,
 } from '../../ui/icons';
 import { Markdown } from './Markdown';
+import { SessionChips } from './SessionChips';
 import { ToolCard } from './ToolCard';
 
 const BACKEND_LABEL: Record<string, string> = {
@@ -155,6 +156,7 @@ export function ChatPane({
             <Item
               key={item.key}
               item={item}
+              backend={backendOf(config)}
               onOpenInEditor={onOpenInEditor}
               onShowTable={onShowTable}
               onAnswer={onAnswer}
@@ -174,6 +176,21 @@ export function ChatPane({
       </div>
     </div>
   );
+}
+
+/** The backend and model the configuration names. */
+function backendOf(config: AgentConfig | null): {
+  name: string;
+  model: string;
+  delegated: boolean;
+} {
+  const inference = config?.inference ?? null;
+  const option = config?.backends.find((b) => b.kind === inference?.kind);
+  return {
+    name: inference ? (BACKEND_LABEL[inference.kind] ?? inference.kind) : '',
+    model: inference?.model || option?.defaultModel || '',
+    delegated: option?.delegated ?? false,
+  };
 }
 
 interface ComposerProps {
@@ -314,12 +331,14 @@ function Composer({
 
 interface ItemProps {
   item: ChatItem;
+  /** The backend and model in use, for a session the host opened itself. */
+  backend: { name: string; model: string; delegated: boolean };
   onOpenInEditor: (sql: string) => void;
   onShowTable: (item: ToolItem) => void;
   onAnswer: (approvalId: string, decision: 'accept' | 'decline') => void;
 }
 
-function Item({ item, onOpenInEditor, onShowTable, onAnswer }: ItemProps) {
+function Item({ item, backend, onOpenInEditor, onShowTable, onAnswer }: ItemProps) {
   switch (item.kind) {
     case 'user':
       return (
@@ -338,19 +357,8 @@ function Item({ item, onOpenInEditor, onShowTable, onAnswer }: ItemProps) {
           onAnswer={onAnswer}
         />
       );
-    case 'session': {
-      const mode = SAFETY_MODES.find((m) => m.mode === item.mode);
-      const label = mode?.label ?? item.mode;
-      return (
-        <div className="text-[11px] text-ink-muted">
-          {item.agent
-            ? `${item.agent} started on the engine in ${label} mode with ${item.tools} engine tools and no others${
-                item.model ? `. Model: ${item.model}` : ''
-              }.`
-            : `Engine session opened in ${label} mode, ${item.tools} tools.`}
-        </div>
-      );
-    }
+    case 'session':
+      return <SessionChips item={item} backend={backend} />;
     case 'notice':
       return (
         <div

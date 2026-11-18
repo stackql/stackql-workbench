@@ -220,7 +220,16 @@ export type AgentEvent =
     }
   | {
       event: 'delegateStarted';
-      data: { mode: SafetyMode; agent: string; model: string | null; tools: number };
+      data: {
+        mode: SafetyMode;
+        /** The agent's name, for example "GitHub Copilot CLI". */
+        agent: string;
+        version: string;
+        /** The protocol it is driven over, for example "ACP 1". */
+        protocol: string;
+        model: string | null;
+        tools: number;
+      };
     }
   | { event: 'assistantText'; data: { text: string } }
   /** A piece of the reply as it is written. Pieces with one id are one message. */

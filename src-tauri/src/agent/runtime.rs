@@ -48,8 +48,9 @@ const PREAMBLE: &str = "You are the assistant inside StackQL Workbench, a deskto
 cloud and SaaS providers with SQL through a local StackQL engine. You work through the tools \
 provided, which run against that engine.\n\n\
 How to work here:\n\
-- The operator sees every statement you run, as SQL, and sees row results in a grid. Summarise \
-what you found instead of repeating large tables.\n\
+- The operator sees every statement you run, as SQL, with the rows it returned, in a card above \
+your reply. Do not restate rows that a card already shows. Add interpretation only: what the \
+rows mean, what stands out, what to do next.\n\
 - When you run or propose a statement, show the SQL.\n\
 - Statements that change something may need the operator's approval. The tool asks for it. If the \
 operator declines, do not try again or look for another way to make the same change. Say what \
@@ -88,8 +89,12 @@ pub enum AgentEvent {
     /// client, on the engine in the given mode.
     DelegateStarted {
         mode: SafetyMode,
-        /// The agent's name and version.
+        /// The agent's name, for example "GitHub Copilot CLI".
         agent: String,
+        /// The agent's version.
+        version: String,
+        /// The protocol it is driven over, for example "ACP 1".
+        protocol: String,
         /// The model it will use, when it says.
         model: Option<String>,
         /// How many of the engine's tools it was given. It has no others.
@@ -382,8 +387,9 @@ impl AgentRuntime {
             let version = session.agent_version();
             emit(AgentEvent::DelegateStarted {
                 mode,
-                agent: format!("{} CLI {version}, ACP {ACP_VERSION}", copilot::PROFILE.name)
-                    .replace(" CLI ,", ","),
+                agent: format!("{} CLI", copilot::PROFILE.name),
+                version: version.to_string(),
+                protocol: format!("ACP {ACP_VERSION}"),
                 model: session.current_model().map(str::to_string),
                 tools,
             });
@@ -1039,7 +1045,9 @@ mod tests {
         );
         let event = AgentEvent::DelegateStarted {
             mode: SafetyMode::Safe,
-            agent: "GitHub Copilot CLI 1.0.113, ACP 1".into(),
+            agent: "GitHub Copilot CLI".into(),
+            version: "1.0.113".into(),
+            protocol: "ACP 1".into(),
             model: Some("claude-sonnet-5.5".into()),
             tools: 15,
         };
@@ -1049,7 +1057,9 @@ mod tests {
                 "event": "delegateStarted",
                 "data": {
                     "mode": "safe",
-                    "agent": "GitHub Copilot CLI 1.0.113, ACP 1",
+                    "agent": "GitHub Copilot CLI",
+                    "version": "1.0.113",
+                    "protocol": "ACP 1",
                     "model": "claude-sonnet-5.5",
                     "tools": 15
                 }

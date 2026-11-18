@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AgentTable } from '../../host/types';
 import { argumentSummary, toolTitle, type ApprovalState, type ToolItem } from '../../lib/chat';
+import { equivalentSql } from '../../lib/equivalentSql';
 import { formatElapsed, formatRowCount } from '../../lib/results';
 import { IconButton } from '../../ui/IconButton';
 import { Check, ErrorMark, OpenInEditor, Spinner, Warning } from '../../ui/icons';
@@ -17,6 +18,9 @@ export function ToolCard({ item, onOpenInEditor, onShowTable, onAnswer }: ToolCa
   const [showText, setShowText] = useState(false);
   const args = argumentSummary(item.arguments);
   const waiting = item.approval?.decision === 'pending';
+  // A metadata tool carries no statement. Show one the operator could run
+  // for the same answer, and say that is what it is.
+  const equivalent = item.sql === null ? equivalentSql(item.tool, item.arguments) : null;
 
   return (
     <div
@@ -60,6 +64,15 @@ export function ToolCard({ item, onOpenInEditor, onShowTable, onAnswer }: ToolCa
           sql={item.sql}
           onOpen={() => {
             onOpenInEditor(item.sql ?? '');
+          }}
+        />
+      )}
+      {equivalent !== null && (
+        <SqlBlock
+          label="Equivalent SQL"
+          sql={equivalent}
+          onOpen={() => {
+            onOpenInEditor(equivalent);
           }}
         />
       )}
@@ -180,9 +193,12 @@ function ResultPreview({ table, onShowTable }: { table: AgentTable; onShowTable:
   );
 }
 
-function SqlBlock({ sql, onOpen }: { sql: string; onOpen: () => void }) {
+function SqlBlock({ sql, label, onOpen }: { sql: string; label?: string; onOpen: () => void }) {
   return (
     <div className="relative border-t border-line bg-surface-alt">
+      {label && (
+        <div className="px-2 pt-1 text-[11px] tracking-wide text-ink-muted uppercase">{label}</div>
+      )}
       <pre className="selectable m-0 max-h-48 overflow-auto py-1.5 pr-8 pl-2 font-mono text-[12px] break-words whitespace-pre-wrap">
         {sql}
       </pre>

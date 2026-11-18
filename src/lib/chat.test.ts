@@ -411,7 +411,9 @@ describe('a delegated agent', () => {
         event: 'delegateStarted',
         data: {
           mode: 'safe',
-          agent: 'GitHub Copilot CLI 1.0.113, ACP 1',
+          agent: 'GitHub Copilot CLI',
+          version: '1.0.113',
+          protocol: 'ACP 1',
           model: 'small',
           tools: 15,
         },
@@ -421,7 +423,9 @@ describe('a delegated agent', () => {
       kind: 'session',
       mode: 'safe',
       tools: 15,
-      agent: 'GitHub Copilot CLI 1.0.113, ACP 1',
+      agent: 'GitHub Copilot CLI',
+      agentVersion: '1.0.113',
+      agentProtocol: 'ACP 1',
       model: 'small',
     });
   });

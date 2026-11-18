@@ -55,6 +55,9 @@ export type ChatItem =
       tools: number;
       /** The delegated agent that opened the session, when there is one. */
       agent?: string;
+      agentVersion?: string;
+      /** The protocol a delegated agent is driven over. */
+      agentProtocol?: string;
       /** The model that agent says it uses. */
       model?: string | null;
     };
@@ -102,6 +105,8 @@ export function applyAgentEvent(state: ChatState, event: AgentEvent): ChatState 
         protocolVersion: '',
         tools: event.data.tools,
         agent: event.data.agent,
+        agentVersion: event.data.version,
+        agentProtocol: event.data.protocol,
         model: event.data.model,
       }));
     case 'assistantText':

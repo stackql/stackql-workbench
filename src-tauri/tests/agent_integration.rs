@@ -522,6 +522,83 @@ async fn a_change_runs_alone_between_the_calls_around_it() {
     teardown(fx).await;
 }
 
+/// The values of one column of a tool result shown to the operator.
+fn tool_column(events: &[AgentEvent], call: &str, column: &str) -> Vec<String> {
+    let table = events
+        .iter()
+        .find_map(|e| match e {
+            AgentEvent::ToolCallFinished {
+                id,
+                table: Some(table),
+                ..
+            } if id == call => Some(table.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{call} returned no table"));
+    let at = table
+        .columns
+        .iter()
+        .position(|c| c == column)
+        .unwrap_or_else(|| panic!("{call} has no column {column}: {:?}", table.columns));
+    let mut values: Vec<String> = table
+        .rows
+        .iter()
+        .filter_map(|row| row[at].clone())
+        .collect();
+    values.sort();
+    values
+}
+
+#[tokio::test]
+async fn the_equivalent_sql_shown_for_discovery_tools_returns_what_the_tools_return() {
+    if !engine_available() {
+        return;
+    }
+    // The webview shows these statements under "Equivalent SQL" on the cards
+    // of the discovery tools. See src/lib/equivalentSql.ts. This holds the
+    // claim to the engine: the statement gives the rows the tool gave.
+    let fx = fixture("equivalent").await;
+    let model = Scripted::new(vec![
+        calls(&[
+            ("c1", "list_providers", json!({})),
+            (
+                "c2",
+                "list_services",
+                json!({ "provider": "stackql_preview" }),
+            ),
+        ]),
+        says("Listed."),
+    ]);
+    let (emit, events) = collector();
+    fx.runtime
+        .send(model, SafetyMode::ReadOnly, "list".into(), emit)
+        .await
+        .unwrap();
+    let events = events.lock().unwrap().clone();
+
+    for (call, statement) in [
+        ("c1", "SHOW PROVIDERS;"),
+        ("c2", "SHOW SERVICES IN stackql_preview;"),
+    ] {
+        let result = fx.connection.fetch(statement.to_string()).await.unwrap();
+        let at = result.column("name").expect("a name column");
+        let mut from_statement: Vec<String> = result
+            .rows
+            .iter()
+            .filter_map(|row| row.get(at).cloned().flatten())
+            .collect();
+        from_statement.sort();
+        assert!(!from_statement.is_empty(), "{statement} returned nothing");
+        assert_eq!(
+            tool_column(&events, call, "name"),
+            from_statement,
+            "{statement} is not equivalent to the tool"
+        );
+    }
+
+    teardown(fx).await;
+}
+
 #[tokio::test]
 async fn read_only_mode_refuses_without_asking() {
     if !engine_available() {
