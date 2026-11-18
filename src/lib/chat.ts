@@ -36,10 +36,26 @@ export interface ToolItem {
 
 export type ChatItem =
   | { kind: 'user'; key: string; text: string }
-  | { kind: 'assistant'; key: string; text: string }
+  | {
+      kind: 'assistant';
+      key: string;
+      text: string;
+      /** Set while the text arrives in pieces, so the pieces find their message. */
+      messageId?: string;
+    }
   | ToolItem
   | { kind: 'notice'; key: string; text: string; tone: 'info' | 'warn' | 'error' }
-  | { kind: 'session'; key: string; mode: SafetyMode; protocolVersion: string; tools: number };
+  | {
+      kind: 'session';
+      key: string;
+      mode: SafetyMode;
+      protocolVersion: string;
+      tools: number;
+      /** The delegated agent that opened the session, when there is one. */
+      agent?: string;
+      /** The model that agent says it uses. */
+      model?: string | null;
+    };
 
 export interface ChatState {
   items: ChatItem[];
@@ -76,8 +92,36 @@ export function applyAgentEvent(state: ChatState, event: AgentEvent): ChatState 
   switch (event.event) {
     case 'sessionStarted':
       return push(state, (key) => ({ kind: 'session', key, ...event.data }));
+    case 'delegateStarted':
+      return push(state, (key) => ({
+        kind: 'session',
+        key,
+        mode: event.data.mode,
+        protocolVersion: '',
+        tools: event.data.tools,
+        agent: event.data.agent,
+        model: event.data.model,
+      }));
     case 'assistantText':
       return push(state, (key) => ({ kind: 'assistant', key, text: event.data.text }));
+    case 'assistantDelta': {
+      // Add the piece to its message. A tool call can sit between two
+      // messages, so look back for it, not only at the last item.
+      for (let index = state.items.length - 1; index >= 0; index -= 1) {
+        const item = state.items[index];
+        if (item?.kind === 'assistant' && item.messageId === event.data.id) {
+          const items = state.items.slice();
+          items[index] = { ...item, text: item.text + event.data.text };
+          return { ...state, items };
+        }
+      }
+      return push(state, (key) => ({
+        kind: 'assistant',
+        key,
+        text: event.data.text,
+        messageId: event.data.id,
+      }));
+    }
     case 'toolCallStarted':
       return push(state, (key) => ({
         kind: 'tool',
@@ -221,6 +265,23 @@ export function pendingApprovals(state: ChatState): ApprovalRequest[] {
   );
 }
 
+/** A short name for the conversation: the start of the operator's first message. */
+export function chatTitle(state: ChatState, maxLength = 44): string | null {
+  const first = state.items.find((item) => item.kind === 'user');
+  if (first?.kind !== 'user') {
+    return null;
+  }
+  const line = first.text.replace(/\s+/g, ' ').trim();
+  return line.length > maxLength ? `${line.slice(0, maxLength - 3).trimEnd()}...` : line;
+}
+
+/** Grows as the conversation does, including while a reply is being written. */
+export function chatProgress(state: ChatState): number {
+  const last = state.items[state.items.length - 1];
+  const tail = last && 'text' in last ? last.text.length : 0;
+  return state.items.length * 100_000 + tail;
+}
+
 export type Segment =
   { kind: 'text'; text: string } | { kind: 'code'; language: string; code: string };
 
@@ -318,3 +379,23 @@ export const SAFETY_MODES: { mode: SafetyMode; label: string; description: strin
     description: 'Everything runs without asking.',
   },
 ];
+
+/**
+ * What the modes come to with a delegated agent. It cannot pass the
+ * engine's approval prompt on, so the engine refuses where it would ask.
+ */
+const DELEGATED_DESCRIPTIONS: Record<SafetyMode, string> = {
+  read_only: 'Queries only. Every change is refused.',
+  safe: 'Queries run. Every change is refused, because this agent cannot show the approval prompt.',
+  delete_safe:
+    'Inserts and updates run. Deletes and lifecycle operations are refused, because this agent cannot show the approval prompt.',
+  full_access: 'Everything runs without asking.',
+};
+
+/** What a safety mode means for the backend in use. */
+export function modeDescription(mode: SafetyMode, delegated: boolean): string {
+  if (delegated) {
+    return DELEGATED_DESCRIPTIONS[mode];
+  }
+  return SAFETY_MODES.find((option) => option.mode === mode)?.description ?? '';
+}

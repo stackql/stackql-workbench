@@ -3,11 +3,13 @@
 
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import type {
   Activity,
   AgentConfig,
   AgentEvent,
   ApprovalDecision,
+  DelegateInfo,
   EngineStatus,
   Field,
   HostError,
@@ -116,7 +118,18 @@ export const host = {
 
     /** Starts a new conversation. */
     reset: () => invoke('agent_reset'),
+
+    /**
+     * Asks a delegated agent for its version and models. This starts the
+     * agent and sends no prompt. `program` is where the agent is, or null
+     * to search PATH.
+     */
+    delegateInfo: (program: string | null) =>
+      invoke<DelegateInfo>('agent_delegate_info', { program }),
   },
+
+  /** Closes the window, which ends the app and stops the engine. */
+  closeWindow: () => getCurrentWindow().close(),
 
   /** What was run recently, by the operator and by the agent. */
   activity: (limit?: number) => invoke<Activity>('activity_list', { limit }),

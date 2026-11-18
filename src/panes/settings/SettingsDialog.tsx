@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { host, toHostError, type EngineStatus, type Settings } from '../../host';
 import { IconButton } from '../../ui/IconButton';
 import { Close } from '../../ui/icons';
@@ -6,12 +6,15 @@ import { Close } from '../../ui/icons';
 interface SettingsDialogProps {
   status: EngineStatus;
   onClose: () => void;
+  /** Which part to bring into view when the dialog opens. */
+  section?: 'engine' | 'model';
   /** Extra sections, shown under the engine settings. */
   children?: ReactNode;
 }
 
 /** Engine settings. Saving restarts the engine when a setting it depends on changed. */
-export function SettingsDialog({ status, onClose, children }: SettingsDialogProps) {
+export function SettingsDialog({ status, onClose, section, children }: SettingsDialogProps) {
+  const extra = useRef<HTMLDivElement>(null);
   const [loaded, setLoaded] = useState<Settings | null>(null);
   const [enginePath, setEnginePath] = useState('');
   const [envFile, setEnvFile] = useState('');
@@ -46,6 +49,17 @@ export function SettingsDialog({ status, onClose, children }: SettingsDialogProp
       active = false;
     };
   }, []);
+
+  // Opened for the model backend: bring that part into view and put the
+  // cursor in its first field.
+  useEffect(() => {
+    if (section !== 'model') {
+      return;
+    }
+    const target = extra.current;
+    target?.scrollIntoView({ block: 'start' });
+    target?.querySelector<HTMLElement>('select, input')?.focus();
+  }, [section]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -213,7 +227,7 @@ export function SettingsDialog({ status, onClose, children }: SettingsDialogProp
             </button>
           </div>
 
-          {children}
+          <div ref={extra}>{children}</div>
         </div>
       </div>
     </div>

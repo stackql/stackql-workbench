@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { EngineState, EngineStatus } from '../../host/types';
-import { Chat, Gear, Panel, Refresh, Spinner } from '../../ui/icons';
+import { Refresh, Spinner } from '../../ui/icons';
 
 const STATE_TEXT: Record<EngineState, string> = {
   stopped: 'Engine stopped',
@@ -20,27 +20,12 @@ interface StatusBarProps {
   status: EngineStatus;
   restarting: boolean;
   onRestart: () => void;
-  onOpenSettings: () => void;
-  /** Which side pane is open, if any. */
-  sidePane: 'chat' | 'activity' | null;
-  /** False when no inference backend is configured. The chat button is hidden then. */
-  chatAvailable: boolean;
-  onToggleSidePane: (pane: 'chat' | 'activity') => void;
   /** Extra items shown at the right, before the buttons. */
   children?: ReactNode;
 }
 
 /** Shows the resolved engine path, its version and its state. */
-export function StatusBar({
-  status,
-  restarting,
-  onRestart,
-  onOpenSettings,
-  sidePane,
-  chatAvailable,
-  onToggleSidePane,
-  children,
-}: StatusBarProps) {
+export function StatusBar({ status, restarting, onRestart, children }: StatusBarProps) {
   const busy = restarting || status.state === 'starting';
   return (
     <div className="flex h-6 shrink-0 items-center gap-3 border-t border-line bg-brand px-2 text-[12px] text-on-brand">
@@ -78,34 +63,6 @@ export function StatusBar({
       <span className="flex-1" />
       {children}
 
-      {chatAvailable && (
-        <button
-          type="button"
-          aria-pressed={sidePane === 'chat'}
-          className={`flex h-5 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-white/15 ${
-            sidePane === 'chat' ? 'bg-white/20' : ''
-          }`}
-          onClick={() => {
-            onToggleSidePane('chat');
-          }}
-        >
-          <Chat />
-          Chat
-        </button>
-      )}
-      <button
-        type="button"
-        aria-pressed={sidePane === 'activity'}
-        className={`flex h-5 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-white/15 ${
-          sidePane === 'activity' ? 'bg-white/20' : ''
-        }`}
-        onClick={() => {
-          onToggleSidePane('activity');
-        }}
-      >
-        <Panel />
-        Activity
-      </button>
       <button
         type="button"
         className="flex h-5 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-white/15 disabled:opacity-50"
@@ -115,14 +72,6 @@ export function StatusBar({
       >
         <Refresh />
         Restart engine
-      </button>
-      <button
-        type="button"
-        className="flex h-5 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-white/15"
-        onClick={onOpenSettings}
-      >
-        <Gear />
-        Settings
       </button>
     </div>
   );

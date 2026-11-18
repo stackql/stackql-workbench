@@ -136,3 +136,61 @@ export const Trash = (p: IconProps) => (
     <path d="M3 4.5h10M6.5 4.5v-2h3v2M4.5 4.5l.6 8.5h5.8l.6-8.5" />
   </Svg>
 );
+
+export const NewChat = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 3.5h11v7.5h-6l-3 2.5V11h-2z" />
+    <path d="M8 5.5v3.5M6.25 7.25h3.5" />
+  </Svg>
+);
+
+export const Tree = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2.5" y="2" width="4" height="3.5" rx="0.5" />
+    <rect x="9.5" y="6.25" width="4" height="3.5" rx="0.5" />
+    <rect x="9.5" y="10.5" width="4" height="3.5" rx="0.5" />
+    <path d="M4.5 5.5V12.25h5M4.5 8h5" />
+  </Svg>
+);
+
+export const History = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.75 8a5.25 5.25 0 1 0 1.6-3.75" />
+    <path d="M2.5 2.75v2.5H5" />
+    <path d="M8 5.25V8l2 1.5" />
+  </Svg>
+);
+
+export const Sidebar = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="3" width="12" height="10" rx="1.5" />
+    <path d="M6 3v10" />
+  </Svg>
+);
+
+export const ArrowUp = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 13V3.5M4 7.25 8 3.25l4 4" />
+  </Svg>
+);
+
+export const Shield = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 1.75 13 3.5v4c0 3.1-2 5.5-5 6.75C5 13 3 10.6 3 7.5v-4z" />
+  </Svg>
+);
+
+export const Bot = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="5.5" width="10" height="7.5" rx="1.5" />
+    <path d="M8 5.5V3M6 9v1M10 9v1" />
+    <circle cx="8" cy="2.5" r="0.75" fill="currentColor" />
+  </Svg>
+);
+
+export const Table = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="3" width="12" height="10" rx="1" />
+    <path d="M2 6.5h12M2 9.75h12M6.5 3v10" />
+  </Svg>
+);

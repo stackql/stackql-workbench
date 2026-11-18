@@ -26,7 +26,7 @@ export interface EngineStatus {
 /** What the agent may do without asking. The engine enforces it. */
 export type SafetyMode = 'read_only' | 'safe' | 'delete_safe' | 'full_access';
 
-export type BackendKind = 'gemini' | 'anthropic' | 'openai_compatible';
+export type BackendKind = 'gemini' | 'anthropic' | 'openai_compatible' | 'github_copilot';
 
 /** Which model the chat uses. The API key is never part of this. */
 export interface InferenceSettings {
@@ -35,6 +35,8 @@ export interface InferenceSettings {
   model: string;
   /** Null means the backend's default address. */
   baseUrl: string | null;
+  /** For a delegated agent: where its program is. Null searches PATH. */
+  program: string | null;
 }
 
 export interface Settings {
@@ -152,11 +154,32 @@ export interface BackendOption {
   defaultBaseUrl: string;
   /** A local server usually needs no key. */
   keyOptional: boolean;
+  /**
+   * An agent the operator installed runs the model. There is no key and no
+   * address to enter, and no approval prompt.
+   */
+  delegated: boolean;
+}
+
+/** A model a delegated agent offers. */
+export interface AgentModel {
+  id: string;
+  name: string;
+  description: string;
+  /** What a request costs against the operator's plan, for example "1x". */
+  usage: string | null;
+}
+
+/** What a delegated agent says about itself. */
+export interface DelegateInfo {
+  version: string;
+  currentModel: string | null;
+  models: AgentModel[];
 }
 
 /** What the webview may know about the chat setup. Never the key itself. */
 export interface AgentConfig {
-  /** Null means chat is not configured, and the chat pane stays hidden. */
+  /** Null means no model backend is set up yet. */
   inference: InferenceSettings | null;
   hasKey: boolean;
   safetyMode: SafetyMode;
@@ -193,7 +216,13 @@ export type AgentEvent =
       event: 'sessionStarted';
       data: { mode: SafetyMode; protocolVersion: string; tools: number };
     }
+  | {
+      event: 'delegateStarted';
+      data: { mode: SafetyMode; agent: string; model: string | null; tools: number };
+    }
   | { event: 'assistantText'; data: { text: string } }
+  /** A piece of the reply as it is written. Pieces with one id are one message. */
+  | { event: 'assistantDelta'; data: { id: string; text: string } }
   | {
       event: 'toolCallStarted';
       data: { id: string; tool: string; arguments: unknown; sql: string | null };

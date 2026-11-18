@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { AgentTable } from '../../host/types';
 import { argumentSummary, toolTitle, type ApprovalState, type ToolItem } from '../../lib/chat';
 import { formatElapsed, formatRowCount } from '../../lib/results';
 import { IconButton } from '../../ui/IconButton';
@@ -19,7 +20,7 @@ export function ToolCard({ item, onOpenInEditor, onShowTable, onAnswer }: ToolCa
 
   return (
     <div
-      className={`rounded border bg-surface ${waiting ? 'border-warn' : 'border-line'}`}
+      className={`rounded-lg border bg-surface ${waiting ? 'border-warn' : 'border-line'}`}
       data-tool={item.tool}
     >
       <div className="flex items-center gap-2 px-2 py-1">
@@ -64,23 +65,12 @@ export function ToolCard({ item, onOpenInEditor, onShowTable, onAnswer }: ToolCa
               {item.text.trim() || 'The tool reported an error.'}
             </pre>
           ) : item.table ? (
-            <div className="flex items-center gap-2">
-              <span className="text-ink-muted">
-                {formatRowCount(item.table.totalRows)}
-                {item.table.truncated ? `, first ${item.table.rows.length} shown` : ''}
-              </span>
-              {item.table.columns.length > 0 && (
-                <button
-                  type="button"
-                  className="text-accent hover:underline"
-                  onClick={() => {
-                    onShowTable(item);
-                  }}
-                >
-                  Show in grid
-                </button>
-              )}
-            </div>
+            <ResultPreview
+              table={item.table}
+              onShowTable={() => {
+                onShowTable(item);
+              }}
+            />
           ) : (
             <>
               <button
@@ -122,6 +112,63 @@ export function ToolCard({ item, onOpenInEditor, onShowTable, onAnswer }: ToolCa
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Rows shown in the conversation. The grid has the rest. */
+const PREVIEW_ROWS = 8;
+
+/** The first rows of a result, in place, with a way to the full grid. */
+function ResultPreview({ table, onShowTable }: { table: AgentTable; onShowTable: () => void }) {
+  const rows = table.rows.slice(0, PREVIEW_ROWS);
+  const hasGrid = table.columns.length > 0;
+  return (
+    <div>
+      {hasGrid && rows.length > 0 && (
+        <div className="mb-1 max-h-60 overflow-auto rounded border border-line">
+          <table className="selectable w-full border-collapse text-[12px]">
+            <thead>
+              <tr>
+                {table.columns.map((column) => (
+                  <th
+                    key={column}
+                    className="sticky top-0 border-b border-line bg-surface-alt px-2 py-1 text-left font-semibold whitespace-nowrap"
+                  >
+                    {column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={index} className="border-b border-line last:border-b-0">
+                  {row.map((cell, position) => (
+                    <td
+                      key={position}
+                      className="max-w-[320px] truncate px-2 py-1 align-top"
+                      title={cell ?? 'null'}
+                    >
+                      {cell ?? <span className="text-ink-muted italic">null</span>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <span className="text-ink-muted">
+          {formatRowCount(table.totalRows)}
+          {rows.length < table.totalRows ? `, first ${rows.length} shown here` : ''}
+        </span>
+        {hasGrid && (
+          <button type="button" className="text-accent hover:underline" onClick={onShowTable}>
+            Open in grid
+          </button>
+        )}
+      </div>
     </div>
   );
 }

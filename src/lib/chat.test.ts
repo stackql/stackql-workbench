@@ -4,8 +4,11 @@ import {
   applyAgentEvent,
   approvalAnswered,
   argumentSummary,
+  chatProgress,
+  chatTitle,
   emptyChat,
   looksLikeSql,
+  modeDescription,
   pendingApprovals,
   splitFences,
   toolTitle,
@@ -284,5 +287,111 @@ describe('labels', () => {
     expect(argumentSummary({ sql: 'SELECT 1', row_limit: 10 })).toBe('row_limit: 10');
     expect(argumentSummary({})).toBe('');
     expect(argumentSummary(null)).toBe('');
+  });
+});
+
+describe('a reply that arrives in pieces', () => {
+  const delta = (id: string, text: string): AgentEvent => ({
+    event: 'assistantDelta',
+    data: { id, text },
+  });
+
+  it('joins the pieces of one message into one item', () => {
+    const state = play([delta('m1', 'Let me '), delta('m1', 'check.')]);
+    const replies = state.items.filter((item) => item.kind === 'assistant');
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatchObject({ text: 'Let me check.' });
+  });
+
+  it('starts a new item for a new message', () => {
+    const state = play([delta('m1', 'First.'), delta('m2', 'Second.')]);
+    const texts = state.items.flatMap((item) => (item.kind === 'assistant' ? [item.text] : []));
+    expect(texts).toEqual(['First.', 'Second.']);
+  });
+
+  it('finds its message past a tool call that started in between', () => {
+    const state = play([
+      delta('m1', 'Running '),
+      started('c1', 'run_select_query', 'SELECT 1'),
+      delta('m1', 'it now.'),
+      finished('c1'),
+      delta('m2', 'Done.'),
+    ]);
+    expect(state.items.map((item) => item.kind)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'assistant',
+    ]);
+    expect(state.items[1]).toMatchObject({ text: 'Running it now.' });
+    expect(state.items[3]).toMatchObject({ text: 'Done.' });
+  });
+
+  it('keeps whole replies and pieces apart', () => {
+    const state = play([
+      { event: 'assistantText', data: { text: 'Whole.' } },
+      delta('m1', 'Piece.'),
+    ]);
+    const texts = state.items.flatMap((item) => (item.kind === 'assistant' ? [item.text] : []));
+    expect(texts).toEqual(['Whole.', 'Piece.']);
+  });
+
+  it('moves the progress marker with every piece', () => {
+    const before = play([delta('m1', 'a')]);
+    const after = applyAgentEvent(before, delta('m1', 'b'));
+    expect(chatProgress(after)).toBeGreaterThan(chatProgress(before));
+    expect(chatProgress(applyAgentEvent(after, delta('m2', 'c')))).toBeGreaterThan(
+      chatProgress(after),
+    );
+  });
+});
+
+describe('a delegated agent', () => {
+  it('shows what was started, in which mode and with which model', () => {
+    const state = play([
+      {
+        event: 'delegateStarted',
+        data: {
+          mode: 'safe',
+          agent: 'GitHub Copilot CLI 1.0.113, ACP 1',
+          model: 'small',
+          tools: 15,
+        },
+      },
+    ]);
+    expect(state.items[1]).toMatchObject({
+      kind: 'session',
+      mode: 'safe',
+      tools: 15,
+      agent: 'GitHub Copilot CLI 1.0.113, ACP 1',
+      model: 'small',
+    });
+  });
+
+  it('says changes are refused where another backend would ask', () => {
+    expect(modeDescription('safe', false)).toContain('asks you first');
+    expect(modeDescription('safe', true)).toContain('refused');
+    expect(modeDescription('safe', true)).not.toContain('asks');
+    expect(modeDescription('delete_safe', true)).toContain('refused');
+    // Where nothing needs approval the two read the same.
+    expect(modeDescription('read_only', true)).toBe(modeDescription('read_only', false));
+    expect(modeDescription('full_access', true)).toBe(modeDescription('full_access', false));
+  });
+});
+
+describe('chatTitle', () => {
+  it('is null before the first message', () => {
+    expect(chatTitle(emptyChat)).toBeNull();
+  });
+
+  it('is the start of the first message, on one line', () => {
+    const state = userSent(userSent(emptyChat, 'How many\n  buckets do I have?'), 'and regions?');
+    expect(chatTitle(state)).toBe('How many buckets do I have?');
+  });
+
+  it('is cut when long', () => {
+    const title = chatTitle(userSent(emptyChat, 'word '.repeat(40)), 20);
+    expect(title).toHaveLength(20);
+    expect(title?.endsWith('...')).toBe(true);
   });
 });

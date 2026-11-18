@@ -1,3 +1,4 @@
+import { redo, undo } from '@codemirror/commands';
 import { sql, SQLDialect } from '@codemirror/lang-sql';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Prec } from '@codemirror/state';
@@ -86,6 +87,11 @@ export interface EditorHandle {
   /** Replaces the whole buffer and focuses the editor. */
   replaceAll: (text: string) => void;
   focus: () => void;
+  /** Whether the cursor is in the editor. */
+  hasFocus: () => boolean;
+  /** Undoes the last edit. The editor keeps its own history. */
+  undo: () => void;
+  redo: () => void;
 }
 
 interface EditorProps {
@@ -179,6 +185,17 @@ export function Editor({ initialText, onRun, onChange, ref }: EditorProps) {
         target.focus();
       },
       focus: () => view.current?.focus(),
+      hasFocus: () => view.current?.hasFocus ?? false,
+      undo: () => {
+        if (view.current) {
+          undo(view.current);
+        }
+      },
+      redo: () => {
+        if (view.current) {
+          redo(view.current);
+        }
+      },
     }),
     [],
   );
