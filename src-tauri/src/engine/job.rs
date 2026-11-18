@@ -113,6 +113,36 @@ mod tests {
     }
 
     #[test]
+    fn a_process_in_another_job_can_join_an_empty_job_but_not_a_used_one() {
+        // The child starts out in a job of its own, as a packaged app does.
+        let theirs = Job::new().unwrap();
+        let mut child = long_running_child();
+        theirs.assign(child.as_raw_handle()).unwrap();
+
+        // A job that already has a member will not take it.
+        let used = Job::new().unwrap();
+        let mut member = long_running_child();
+        used.assign(member.as_raw_handle()).unwrap();
+        assert!(
+            used.assign(child.as_raw_handle()).is_err(),
+            "a used job took a process from another job"
+        );
+
+        // An empty one will, and closing it still kills the process.
+        let empty = Job::new().unwrap();
+        empty.assign(child.as_raw_handle()).unwrap();
+        drop(empty);
+        assert!(
+            wait_for_exit(&mut child, Duration::from_secs(5)),
+            "the process outlived the job it was put in"
+        );
+
+        drop(used);
+        assert!(wait_for_exit(&mut member, Duration::from_secs(5)));
+        drop(theirs);
+    }
+
+    #[test]
     fn closing_the_job_kills_its_processes() {
         let job = Job::new().unwrap();
         let mut child = long_running_child();

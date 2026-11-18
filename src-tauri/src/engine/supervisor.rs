@@ -119,13 +119,25 @@ impl Supervisor {
             source,
         })?;
 
+        // A process that starts out in a job of its own cannot join a job
+        // that already has members. A packaged Windows app does that, and a
+        // program on PATH can be an alias for one. Such a child gets a job
+        // to itself, which an empty job always allows, with the same rule:
+        // it dies when the app's handle to the job closes.
         #[cfg(windows)]
-        if let Some(handle) = child.raw_handle()
-            && let Err(source) = self.job.assign(handle)
-        {
-            let _ = child.start_kill();
-            return Err(SupervisorError::Tie { program, source });
-        }
+        let own_job = match child.raw_handle() {
+            Some(handle) if self.job.assign(handle).is_err() => {
+                let job = super::job::Job::new().and_then(|job| job.assign(handle).map(|()| job));
+                match job {
+                    Ok(job) => Some(job),
+                    Err(source) => {
+                        let _ = child.start_kill();
+                        return Err(SupervisorError::Tie { program, source });
+                    }
+                }
+            }
+            _ => None,
+        };
 
         #[cfg(unix)]
         let watchdog = match child.id().map(super::watchdog::Watchdog::spawn) {
@@ -171,6 +183,10 @@ impl Supervisor {
             if let Some(watchdog) = watchdog {
                 watchdog.disarm().await;
             }
+            // Closing a job the child had to itself ends whatever the child
+            // left running.
+            #[cfg(windows)]
+            drop(own_job);
             let _ = exit_tx.send(Some(info));
         });
 
