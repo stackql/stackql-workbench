@@ -89,6 +89,8 @@ export interface ExplorerHandle {
   jump: () => void;
   /** Opens the list of what the registry offers. */
   addProvider: () => void;
+  /** Asks the registry again and says which providers have a newer version. */
+  checkUpdates: () => void;
 }
 
 interface ExplorerProps {
@@ -144,6 +146,8 @@ export function Explorer({
   const [jumpOpen, setJumpOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Something to tell the operator that is not a failure.
+  const [info, setInfo] = useState<string | null>(null);
 
   // Guards against a slow response from before a refresh landing after it.
   const generation = useRef(0);
@@ -155,6 +159,38 @@ export function Explorer({
   const tree = useRef<HTMLDivElement>(null);
   const filterBox = useRef<HTMLInputElement>(null);
 
+  const checkUpdates = useCallback(() => {
+    if (roots.status !== 'loaded') {
+      return;
+    }
+    const installed = roots.nodes;
+    setNotice(null);
+    setInfo('Asking the registry');
+    host.explorer.registry().then(
+      (offered) => {
+        const next = new Map(offered.map((provider) => [provider.name, provider.version]));
+        setLatest(next);
+        const behind = installed
+          .filter((node) => {
+            const version = next.get(node.label);
+            return version !== undefined && (compareVersions(node.detail, version) ?? 0) < 0;
+          })
+          .map((node) => node.label);
+        setInfo(
+          installed.length === 0
+            ? 'No provider is installed.'
+            : behind.length === 0
+              ? 'Every installed provider is at the version the registry has.'
+              : `The registry has a newer version of ${behind.join(', ')}. Update it from its menu.`,
+        );
+      },
+      (error: unknown) => {
+        setInfo(null);
+        setNotice(toHostError(error).message);
+      },
+    );
+  }, [roots]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -164,8 +200,9 @@ export function Explorer({
       addProvider: () => {
         setAdding(true);
       },
+      checkUpdates,
     }),
-    [],
+    [checkUpdates],
   );
 
   useEffect(() => {
@@ -682,16 +719,19 @@ export function Explorer({
         )}
       </div>
 
-      {notice !== null && (
+      {(notice ?? info) !== null && (
         <p
-          className="selectable flex shrink-0 items-start gap-1 border-b border-line px-2 py-1 text-danger"
+          className={`selectable flex shrink-0 items-start gap-1 border-b border-line px-2 py-1 ${
+            notice !== null ? 'text-danger' : 'text-ink-muted'
+          }`}
           role="status"
         >
-          <span className="min-w-0 flex-1 break-words">{notice}</span>
+          <span className="min-w-0 flex-1 break-words">{notice ?? info}</span>
           <IconButton
             label="Dismiss"
             onClick={() => {
               setNotice(null);
+              setInfo(null);
             }}
           >
             <Close />

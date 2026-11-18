@@ -94,6 +94,9 @@ export interface RunSummary {
   elapsedMs: number;
 }
 
+/** One of the app's own links. The host holds the address. */
+export type AppLink = 'docs' | 'queryLibrary' | 'issues';
+
 /** What a rejected host call carries. */
 export interface HostError {
   kind: string;

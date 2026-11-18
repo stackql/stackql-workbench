@@ -10,6 +10,7 @@ import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'reac
 import {
   EMPTY_CATALOG,
   currentStatement,
+  statementAt,
   suggest,
   type Catalog,
   type Suggestion,
@@ -147,6 +148,8 @@ const highlighting = HighlightStyle.define([
 export interface EditorHandle {
   /** The selected text, or the whole buffer when nothing is selected. */
   runText: () => string;
+  /** The selected text, or the statement the cursor is in when nothing is selected. */
+  selectionOrStatement: () => string;
   /** Inserts text at the cursor, replacing any selection, and focuses the editor. */
   insert: (text: string) => void;
   /** Replaces the whole buffer and focuses the editor. */
@@ -174,6 +177,11 @@ interface EditorProps {
 function textToRun(view: EditorView): string {
   const { from, to } = view.state.selection.main;
   return from === to ? view.state.doc.toString() : view.state.sliceDoc(from, to);
+}
+
+function selectionOrStatement(view: EditorView): string {
+  const { from, to, head } = view.state.selection.main;
+  return from === to ? statementAt(view.state.doc.toString(), head) : view.state.sliceDoc(from, to);
 }
 
 /** One CodeMirror buffer with SQL highlighting. */
@@ -212,6 +220,13 @@ export function Editor({ initialText, onRun, onChange, catalog, sample, ref }: E
                 return true;
               },
             },
+            {
+              key: 'Mod-Shift-Enter',
+              run: (target) => {
+                onRunRef.current(selectionOrStatement(target));
+                return true;
+              },
+            },
           ]),
         ),
         basicSetup,
@@ -243,6 +258,7 @@ export function Editor({ initialText, onRun, onChange, catalog, sample, ref }: E
     ref,
     () => ({
       runText: () => (view.current ? textToRun(view.current) : ''),
+      selectionOrStatement: () => (view.current ? selectionOrStatement(view.current) : ''),
       insert: (text) => {
         const target = view.current;
         if (!target) {

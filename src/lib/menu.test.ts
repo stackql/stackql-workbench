@@ -11,8 +11,24 @@ const press = (key: string, over: Partial<KeyPress> = {}): KeyPress => ({
 });
 
 describe('the menus', () => {
-  it('are File, Edit and View', () => {
-    expect(MENUS.map((menu) => menu.label)).toEqual(['File', 'Edit', 'View']);
+  it('are File, Edit, View, Query, Providers and Help', () => {
+    expect(MENUS.map((menu) => menu.label)).toEqual([
+      'File',
+      'Edit',
+      'View',
+      'Query',
+      'Providers',
+      'Help',
+    ]);
+  });
+
+  it('say that reloading credentials restarts the engine', () => {
+    const labels = MENUS.flatMap((menu) =>
+      menu.entries.flatMap((entry) =>
+        entry.kind === 'command' && entry.id === 'reloadCredentials' ? [entry.label] : [],
+      ),
+    );
+    expect(labels).toEqual(['Reload Credentials (Restarts the Engine)']);
   });
 
   it('list each command once', () => {
@@ -53,6 +69,8 @@ describe('shortcutLabel', () => {
     expect(shortcutLabel({ key: 'n' }, true)).toBe('Cmd+N');
     expect(shortcutLabel({ key: ',' }, false)).toBe('Ctrl+,');
     expect(shortcutLabel({ key: 'p', shift: true }, false)).toBe('Ctrl+Shift+P');
+    expect(shortcutLabel({ key: 'Enter' }, false)).toBe('Ctrl+Enter');
+    expect(shortcutLabel({ key: 'Enter', shift: true }, true)).toBe('Cmd+Shift+Enter');
   });
 });
 
@@ -85,6 +103,8 @@ describe('commandForKey', () => {
     expect(commandForKey(press('n'), false)).toBeNull();
     expect(commandForKey(press('n', { ctrlKey: true, altKey: true }), false)).toBeNull();
     expect(commandForKey(press('n', { ctrlKey: true, shiftKey: true }), false)).toBeNull();
+    // Running is the editor's key. It is listed in the menu and left to the editor.
     expect(commandForKey(press('Enter', { ctrlKey: true }), false)).toBeNull();
+    expect(commandForKey(press('Enter', { ctrlKey: true, shiftKey: true }), false)).toBeNull();
   });
 });

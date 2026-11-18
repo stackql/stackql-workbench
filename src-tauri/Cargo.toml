@@ -54,6 +54,8 @@ rmcp = { version = "3", default-features = false, features = ["client", "transpo
 keyring-core = "1"
 # The system save dialog for exports. Called from host commands only.
 tauri-plugin-dialog = "2"
+# Opens the app's own links in the default browser. Called from a host command only.
+tauri-plugin-opener = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

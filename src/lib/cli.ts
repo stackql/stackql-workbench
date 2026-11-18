@@ -62,6 +62,19 @@ function posix(input: CliInput, sql: string): string {
   ]);
 }
 
+/**
+ * A connection string for the engine's pg wire address, for example
+ * `127.0.0.1:5466`. The server has no authentication and no TLS, and takes
+ * any user and database name. Null when the address is not host and port.
+ */
+export function connectionString(endpoint: string): string | null {
+  const match = /^([\w.-]+|\[[0-9a-fA-F:]+\]):(\d{1,5})$/.exec(endpoint.trim());
+  if (!match) {
+    return null;
+  }
+  return `postgres://stackql@${match[1]}:${match[2]}/stackql?sslmode=disable`;
+}
+
 /** The command for `shell`. The statement is passed on exactly as written. */
 export function execCommand(shell: Shell, input: CliInput): string {
   const sql = input.sql.trim();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { execCommand, type CliInput } from './cli';
+import { connectionString, execCommand, type CliInput } from './cli';
 
 const windows: CliInput = {
   binary: 'C:\\Program Files\\StackQL\\stackql.exe',
@@ -61,6 +61,23 @@ describe('execCommand for PowerShell', () => {
     expect(execCommand('powershell', { ...windows, approot: null, sql: ' SHOW PROVIDERS; ' })).toBe(
       "& 'C:\\Program Files\\StackQL\\stackql.exe' exec -- 'SHOW PROVIDERS;'",
     );
+  });
+});
+
+describe('connectionString', () => {
+  it('names the address, with no TLS', () => {
+    expect(connectionString('127.0.0.1:50262')).toBe(
+      'postgres://stackql@127.0.0.1:50262/stackql?sslmode=disable',
+    );
+    expect(connectionString(' localhost:5466 ')).toBe(
+      'postgres://stackql@localhost:5466/stackql?sslmode=disable',
+    );
+  });
+
+  it('has nothing to offer for anything that is not a host and a port', () => {
+    for (const bad of ['', '127.0.0.1', 'http://127.0.0.1:5466', '127.0.0.1:port', 'a b:1']) {
+      expect(connectionString(bad), bad).toBeNull();
+    }
   });
 });
 

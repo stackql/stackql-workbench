@@ -13,6 +13,15 @@ export type CommandId =
   | 'restartEngine'
   | 'refreshExplorer'
   | 'goToResource'
+  | 'run'
+  | 'runSelection'
+  | 'addProvider'
+  | 'checkUpdates'
+  | 'reloadCredentials'
+  | 'openDocs'
+  | 'openQueryLibrary'
+  | 'reportIssue'
+  | 'about'
   | 'exit'
   | 'undo'
   | 'redo'
@@ -53,7 +62,6 @@ export const MENUS: Menu[] = [
     label: 'File',
     entries: [
       command('newChat', 'New Chat', { key: 'n' }),
-      command('newTab', 'New Query Tab', { key: 't' }),
       separator,
       command('openModelSettings', 'Model Backend...'),
       command('openSettings', 'Settings...', { key: ',' }),
@@ -86,6 +94,39 @@ export const MENUS: Menu[] = [
       command('refreshExplorer', 'Refresh Explorer'),
       separator,
       command('toggleSidebar', 'Toggle Sidebar', { key: 'b' }),
+    ],
+  },
+  {
+    label: 'Query',
+    entries: [
+      // The editor has these keys. They are listed here so they can be found.
+      command('run', 'Run', native('Enter')),
+      command('runSelection', 'Run Selection or Current Statement', {
+        ...native('Enter'),
+        shift: true,
+      }),
+      separator,
+      command('newTab', 'New Tab', { key: 't' }),
+    ],
+  },
+  {
+    label: 'Providers',
+    entries: [
+      command('addProvider', 'Add from Registry...'),
+      command('checkUpdates', 'Check for Updates'),
+      separator,
+      // On the operator's channel new credentials are read when the engine starts.
+      command('reloadCredentials', 'Reload Credentials (Restarts the Engine)'),
+    ],
+  },
+  {
+    label: 'Help',
+    entries: [
+      command('openDocs', 'Documentation'),
+      command('openQueryLibrary', 'Query Library'),
+      command('reportIssue', 'Report an Issue'),
+      separator,
+      command('about', 'About StackQL Workbench'),
     ],
   },
 ];

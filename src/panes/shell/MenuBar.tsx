@@ -9,8 +9,8 @@ interface MenuBarProps {
 }
 
 /**
- * The File, Edit and View menus. They repeat what the side menu and the
- * panes already offer, so everything can be found in one place.
+ * The menu bar. Its menus repeat what the side menu and the panes already
+ * offer, so everything can be found in one place.
  *
  * The menus are drawn in the webview, so they look and behave the same on
  * every platform and can be checked like any other part of the page.
@@ -102,7 +102,7 @@ export function MenuBar({ isMac, onCommand, disabled }: MenuBarProps) {
                     role="menuitem"
                     data-command={entry.id}
                     disabled={disabled?.has(entry.id)}
-                    className="flex h-7 w-full items-center gap-6 px-3 text-left hover:bg-surface-sunken disabled:opacity-50 disabled:hover:bg-transparent"
+                    className="flex h-7 w-full items-center gap-6 px-3 text-left whitespace-nowrap hover:bg-surface-sunken disabled:opacity-50 disabled:hover:bg-transparent"
                     onMouseDown={(event) => {
                       event.preventDefault();
                     }}

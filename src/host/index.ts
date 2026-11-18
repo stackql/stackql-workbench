@@ -1,6 +1,7 @@
 // The only module in the webview that touches Tauri. Panes call these typed
 // wrappers. An ESLint rule keeps Tauri imports out of everything else.
 
+import { getVersion } from '@tauri-apps/api/app';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -8,6 +9,7 @@ import type {
   Activity,
   AgentConfig,
   AgentEvent,
+  AppLink,
   ApprovalDecision,
   DelegateInfo,
   EngineStatus,
@@ -137,6 +139,12 @@ export const host = {
    */
   saveTextFile: (suggestedName: string, kind: 'csv' | 'json' | 'jsonl', contents: string) =>
     invoke<string | null>('save_text_file', { suggestedName, kind, contents }),
+
+  /** Opens one of the app's own links in the operator's browser. */
+  openLink: (link: AppLink) => invoke('open_link', { link }),
+
+  /** The version of this app. */
+  appVersion: () => getVersion(),
 
   /** What was run recently, by the operator and by the agent. */
   activity: (limit?: number) => invoke<Activity>('activity_list', { limit }),

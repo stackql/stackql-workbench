@@ -4,6 +4,7 @@ import {
   catalogFrom,
   currentStatement,
   sampleStatement,
+  statementAt,
   suggest,
   type Catalog,
 } from './completion';
@@ -143,6 +144,26 @@ describe('currentStatement', () => {
     });
     expect(currentStatement(text, text.length).statement).toBe(' SHOW VERSION');
     expect(currentStatement('SELECT 1', 3)).toEqual({ before: 'SEL', statement: 'SELECT 1' });
+  });
+});
+
+describe('statementAt', () => {
+  const text = 'SHOW PROVIDERS;\nSHOW VERSION;\n';
+
+  it('takes the statement the cursor is in', () => {
+    expect(statementAt(text, 4)).toBe('SHOW PROVIDERS');
+    expect(statementAt(text, text.indexOf('VERSION'))).toBe('SHOW VERSION');
+  });
+
+  it('takes the statement that has just ended when the cursor follows its semicolon', () => {
+    expect(statementAt(text, text.length)).toBe('SHOW VERSION');
+    expect(statementAt(text, 'SHOW PROVIDERS;'.length)).toBe('SHOW PROVIDERS');
+    expect(statementAt('SHOW VERSION ;  ', 16)).toBe('SHOW VERSION');
+  });
+
+  it('has nothing to give for an empty editor', () => {
+    expect(statementAt('', 0)).toBe('');
+    expect(statementAt(' ;; ', 4)).toBe('');
   });
 });
 

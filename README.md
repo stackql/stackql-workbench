@@ -203,7 +203,7 @@ The engine keeps its provider cache in a folder of the app's own: `.stackql` bes
 
 Provider credentials are environment variables the engine reads. On Windows the engine sees the variables of your user account. To use a dotenv file, set it under Settings.
 
-The app opens in chat. The side menu leads to the explorer, which holds the provider tree, the query editor and the results grid, and to the activity list. The File, Edit and View menus repeat those.
+The app opens in chat. The side menu leads to the explorer, which holds the provider tree, the query editor and the results grid, and to the activity list. The File, Edit, View, Query, Providers and Help menus repeat those.
 
 Chat needs a model backend. The first time you send a message without one, the model backend settings open. There are two kinds.
 

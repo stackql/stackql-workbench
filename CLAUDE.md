@@ -13,7 +13,7 @@ Pre-alpha. This much has landed on Windows.
 - M0, foundations: engine discovery and supervision, the pg wire query service, the explorer, one editor buffer and the results grid.
 - The core of M3, chat: the MCP client with approvals, the agent loop, the activity pane, and API key backends for Gemini, Anthropic and OpenAI-compatible servers. Anthropic and OpenAI-compatible were M4 items and came along because the backend interface made them cheap.
 - The first delegated agent, an M5 item: the GitHub Copilot CLI, driven over the Agent Client Protocol. It uses the sign-in the CLI already has.
-- A chat-first layout: chat is the view the app opens in, with a side menu for the explorer and activity, and File, Edit and View menus.
+- A chat-first layout: chat is the view the app opens in, with a side menu for the explorer and activity, and File, Edit, View, Query, Providers and Help menus.
 - Most of M1, the query IDE: editor tabs, completion from provider metadata, the JSON cell viewer, statement history, export as CSV and JSON, and a `stackql exec` command for a statement.
 
 Not started: the rest of M1 (saved `.iql` files, cancel, a streaming grid), M2 (packaging), plan sign-in and any delegated agent other than the Copilot CLI. Replies from the API key backends are not streamed yet. Replies from the Copilot CLI are.
@@ -65,6 +65,7 @@ These are the chosen defaults. Check the current stable version and API of each 
 | Process supervision | `windows-sys` job object on Windows, process group plus a pipe watchdog on Unix |
 | Clipboard | `arboard`, write only, through a host command |
 | Save dialog | `tauri-plugin-dialog`, called from host commands only. The webview has no access to it |
+| Links | `tauri-plugin-opener`, called from one host command that holds a fixed list of the app's own links |
 | Completion | `@codemirror/autocomplete`, with a source written in this repository |
 | HTTPS client | `reqwest` with the OS TLS stack (`native-tls`) |
 | ACP client | Written in this repository: JSON-RPC over stdio, protocol version 1, the client side only |
@@ -103,7 +104,7 @@ stackql-workbench/
       activity/         operator history, engine audit log reader
       icons/            provider icon lookup, fetch and cache
       config/           settings
-      ipc/              command and event definitions, saving an export
+      ipc/              command and event definitions, saving an export, the app's own links
     examples/           pgwire_spike and mcp_spike, the probes behind the spike reports
     tests/              integration tests against a real stackql
   scripts/              test launcher
@@ -331,11 +332,15 @@ A few fixed points for the interface.
 - The app icon is StackQL's own favicon. The files in `src-tauri/icons/` were generated with `npx tauri icon` from `static/android-chrome-512x512.png` in the `stackql/stackql.io` repository, which is the same mark as its `favicon.ico` at a usable resolution.
 - Provider nodes in the explorer show the provider's own icon. The host resolves it through the provider dictionary published at `src/configs/providers.json` in `stackql/stackql.io`, fetches the icon from `stackql.io`, caches it in the app cache directory and passes it to the webview as a `data:` URL. A provider with no entry, or whose icon cannot be fetched, shows the letter badge. Providers built into the engine, such as `stackql_preview`, show the StackQL icon, which is compiled in. The webview itself still makes no network calls. A snapshot of the dictionary is compiled in as a fallback.
 - Saved queries are plain `.iql` files on disk, not an app database.
-- Layout: a menu bar with File, Edit and View, a side menu, one main view at a time, and the status bar. The views are chat, the explorer with the editor and results, and activity. Settings is a dialog. Chat is the view the app opens in.
+- Layout: a menu bar with File, Edit, View, Query, Providers and Help, a side menu, one main view at a time, and the status bar. The views are chat, the explorer with the editor and results, and activity. Settings is a dialog. Chat is the view the app opens in.
 - The menus are drawn in the webview, not by the OS, so they are the same on both platforms and can be tested like the rest of the page. They repeat what the side menu and the panes offer.
 - Every view stays mounted while another is shown, so the editor keeps its text and history and a running turn keeps its place.
 - Row results from the assistant are shown in the conversation, first rows only, with a way to open the full result in the grid.
 - Replies are read as markdown by a small reader in `src/lib/markdown.ts` that builds a tree. Model output is never turned into HTML. Links are shown and never opened.
+- The only links the app opens are its own, from the Help menu and the About dialog: the documentation, the query library and the issue tracker. The webview names a link and the host holds its address, so nothing on a page can have an address opened.
+- Activity lists time, who ran it, the safety mode, the statement, the duration, the row count and the outcome, and can be narrowed by who and by outcome. For the agent the outcome is the engine's `decision` from its audit log, grouped for the filter and never worked out from the statement. The audit log has no row count and does not say which backend made a call, so agent rows show no count and are labelled "Agent". What is listed can be saved as JSONL.
+- The status bar shows the engine state, its version and the pg wire address. A click on the address copies `postgres://stackql@127.0.0.1:<port>/stackql?sslmode=disable`. The popover on the state holds the binary, the data folder and Restart.
+- "Reload Credentials" in the Providers menu restarts the engine, and says so. On the human channel that is the only way credentials are read again.
 - Under a method the explorer groups fields into Inputs and Outputs, both collapsed until opened. A field is an input when the engine's param type starts with `input`, and an output otherwise.
 - The explorer does not list `stackql_preview`, the provider built into the engine. It is hidden for now and may come back. The name is in `HIDDEN_PROVIDERS` in `query/explorer.rs` and nowhere else. Only the tree leaves it out: `SHOW PROVIDERS` in the editor and the engine's answers to a model are not filtered.
 - The explorer filter looks only at what has been loaded, and nothing is fetched on a keystroke. Starting a filter reads each provider's services, one statement for each provider. Enter reads the resources of every service not opened yet, four at a time, with progress, and Esc stops it. Methods are matched where a resource's methods have been opened. Under a filter at most 400 rows are drawn.

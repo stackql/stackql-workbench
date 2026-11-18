@@ -82,6 +82,23 @@ export function currentStatement(
   };
 }
 
+/**
+ * The statement to run when nothing is selected: the one the cursor is in,
+ * or the one that ends just before it when the cursor follows a semicolon.
+ */
+export function statementAt(text: string, cursor: number): string {
+  const { before, statement } = currentStatement(text, cursor);
+  const here = statement.trim();
+  // On the line of a semicolon, with nothing typed after it.
+  const justEnded = before.trim() === '' && !before.includes('\n');
+  if (here !== '' && !justEnded) {
+    return here;
+  }
+  const ended = text.slice(0, cursor).replace(/[\s;]+$/, '');
+  const previous = ended === '' ? '' : currentStatement(text, ended.length).statement.trim();
+  return previous !== '' ? previous : here;
+}
+
 const PART = String.raw`(?:"[^"]*"|[A-Za-z_][\w-]*)`;
 const TABLE = new RegExp(
   String.raw`\b(?:from|join|into|update)\s+(${PART})\.(${PART})\.(${PART})`,

@@ -95,6 +95,8 @@ pub fn run() {
     let built = tauri::Builder::default()
         // The save dialog, used from the host only. The webview has no access to it.
         .plugin(tauri_plugin_dialog::init())
+        // Opens the Help menu's links in the browser, from the host only.
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| setup(app))
         .invoke_handler(tauri::generate_handler![
             ipc::engine_status,
@@ -123,6 +125,7 @@ pub fn run() {
             ipc::agent_delegate_info,
             ipc::activity_list,
             ipc::save::save_text_file,
+            ipc::links::open_link,
         ])
         .build(tauri::generate_context!());
 

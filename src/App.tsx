@@ -15,6 +15,7 @@ import { Explorer, type ExplorerHandle } from './panes/explorer/Explorer';
 import { Results } from './panes/results/Results';
 import { ChatSettings } from './panes/settings/ChatSettings';
 import { SettingsDialog } from './panes/settings/SettingsDialog';
+import { AboutDialog } from './panes/shell/AboutDialog';
 import { MenuBar } from './panes/shell/MenuBar';
 import { SideNav, type View } from './panes/shell/SideNav';
 import { EngineBanner } from './panes/statusbar/EngineBanner';
@@ -103,6 +104,7 @@ export function App() {
   const catalog = useRef<Catalog>(EMPTY_CATALOG);
   const [providers, setProviders] = useState<string[]>([]);
   const [cliCopy, setCliCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   const showAgentResult = useCallback((result: AgentResult) => {
     // Results with no columns have nothing to put in a grid.
@@ -291,6 +293,38 @@ export function App() {
           setView('explorer');
           explorer.current?.jump();
           break;
+        case 'run':
+          setView('explorer');
+          run(activeEditor()?.runText() ?? '');
+          break;
+        case 'runSelection':
+          setView('explorer');
+          run(activeEditor()?.selectionOrStatement() ?? '');
+          break;
+        case 'addProvider':
+          setView('explorer');
+          explorer.current?.addProvider();
+          break;
+        case 'checkUpdates':
+          setView('explorer');
+          explorer.current?.checkUpdates();
+          break;
+        case 'reloadCredentials':
+          // On this channel the engine reads credentials when it starts.
+          restart();
+          break;
+        case 'openDocs':
+          void host.openLink('docs').catch(() => undefined);
+          break;
+        case 'openQueryLibrary':
+          void host.openLink('queryLibrary').catch(() => undefined);
+          break;
+        case 'reportIssue':
+          void host.openLink('issues').catch(() => undefined);
+          break;
+        case 'about':
+          setAboutOpen(true);
+          break;
         case 'exit':
           void host.closeWindow().catch(() => undefined);
           break;
@@ -310,7 +344,7 @@ export function App() {
           break;
       }
     },
-    [newChat, restart, openTab, activeEditor],
+    [newChat, restart, openTab, activeEditor, run],
   );
 
   useEffect(() => {
@@ -328,8 +362,13 @@ export function App() {
   }, [runCommand]);
 
   const disabledCommands = useMemo(
-    () => new Set<CommandId>(engineBusy ? ['restartEngine'] : []),
-    [engineBusy],
+    () =>
+      new Set<CommandId>([
+        ...(engineBusy ? (['restartEngine', 'reloadCredentials'] as const) : []),
+        ...(engineRunning ? [] : (['addProvider', 'checkUpdates'] as const)),
+        ...(engineRunning && !running ? [] : (['run', 'runSelection'] as const)),
+      ]),
+    [engineBusy, engineRunning, running],
   );
 
   return (
@@ -527,6 +566,15 @@ export function App() {
       </div>
 
       <StatusBar status={status} restarting={restarting} onRestart={restart} />
+
+      {aboutOpen && (
+        <AboutDialog
+          status={status}
+          onClose={() => {
+            setAboutOpen(false);
+          }}
+        />
+      )}
 
       {settings !== null && (
         <SettingsDialog
