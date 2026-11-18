@@ -20,6 +20,8 @@ const KIND_BADGE: Record<NodeKind, { text: string; className: string; label: str
   methodsGroup: { text: 'M', className: 'text-ink-muted', label: 'Methods' },
   field: { text: '', className: '', label: 'Field' },
   method: { text: 'fn', className: 'text-ink-muted', label: 'Method' },
+  inputsGroup: { text: 'in', className: 'text-ink-muted', label: 'Inputs' },
+  outputsGroup: { text: 'out', className: 'text-ink-muted', label: 'Outputs' },
   param: { text: '', className: '', label: 'Parameter' },
 };
 

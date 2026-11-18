@@ -11,6 +11,8 @@ export type NodeKind =
   | 'methodsGroup'
   | 'field'
   | 'method'
+  | 'inputsGroup'
+  | 'outputsGroup'
   | 'param';
 
 export interface NodePath {
@@ -33,6 +35,8 @@ export interface TreeNode {
   copyText: string | null;
   expandable: boolean;
   path: NodePath;
+  /** Children already in hand, for a group whose members arrived with its parent. */
+  children?: TreeNode[];
 }
 
 /** The slice of the host API the tree needs. */
@@ -177,7 +181,13 @@ const PARAM_LABEL: Record<string, string> = {
   output: 'output',
 };
 
-/** Inputs first, required before optional, then outputs. */
+const isOutput = (field: MethodField) => field.paramType === 'output';
+
+/**
+ * The nodes for a method's fields: required inputs, optional inputs, then
+ * outputs, each kind in the engine's order. An output shows only its type,
+ * because it sits in the Outputs group.
+ */
 export function paramNodes(path: NodePath, fields: MethodField[]): TreeNode[] {
   const name = qualifiedName(path);
   const rank = (field: MethodField) => PARAM_ORDER[field.paramType] ?? 3;
@@ -190,13 +200,50 @@ export function paramNodes(path: NodePath, fields: MethodField[]): TreeNode[] {
         id: `mp:${name}:${field.paramType}:${field.name}`,
         kind: 'param' as const,
         label: field.name,
-        detail: [role, field.type].filter(Boolean).join(' '),
+        detail: [isOutput(field) ? '' : role, field.type].filter(Boolean).join(' '),
         title: field.description || `${field.name} (${role})`,
         copyText: field.name,
         expandable: false,
         path,
       };
     });
+}
+
+/**
+ * A method opens into two groups, Inputs and Outputs, so what a statement
+ * must supply is kept apart from what it returns. Both start collapsed. The
+ * fields arrive in one answer from the engine, so each group carries its
+ * members and opening it needs no second request.
+ */
+export function methodGroupNodes(path: NodePath, fields: MethodField[]): TreeNode[] {
+  const name = qualifiedName(path);
+  const inputs = fields.filter((field) => !isOutput(field));
+  const outputs = fields.filter(isOutput);
+  const required = inputs.filter((field) => field.paramType === 'input_required').length;
+  return [
+    {
+      id: `ig:${name}`,
+      kind: 'inputsGroup',
+      label: 'Inputs',
+      detail: inputs.length === 0 ? 'none' : `${inputs.length}, ${required} required`,
+      title: `What ${name} takes: WHERE clause parameters and request fields`,
+      copyText: null,
+      expandable: inputs.length > 0,
+      path,
+      children: paramNodes(path, inputs),
+    },
+    {
+      id: `og:${name}`,
+      kind: 'outputsGroup',
+      label: 'Outputs',
+      detail: outputs.length === 0 ? 'none' : String(outputs.length),
+      title: `What ${name} returns: the columns a statement can select`,
+      copyText: null,
+      expandable: outputs.length > 0,
+      path,
+      children: paramNodes(path, outputs),
+    },
+  ];
 }
 
 /** Loads the children of a node. `null` loads the roots. */
@@ -229,7 +276,13 @@ export async function loadChildren(node: TreeNode | null, api: ExplorerApi): Pro
       if (service === undefined || resource === undefined || method === undefined) {
         return [];
       }
-      return paramNodes(node.path, await api.methodFields(provider, service, resource, method));
+      return methodGroupNodes(
+        node.path,
+        await api.methodFields(provider, service, resource, method),
+      );
+    case 'inputsGroup':
+    case 'outputsGroup':
+      return node.children ?? [];
     case 'field':
     case 'param':
       return [];

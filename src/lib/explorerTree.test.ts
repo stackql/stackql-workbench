@@ -3,6 +3,7 @@ import {
   fieldNodes,
   loadChildren,
   methodNodes,
+  methodGroupNodes,
   paramNodes,
   providerNodes,
   qualifiedName,
@@ -114,12 +115,49 @@ describe('nodes', () => {
       { name: 'out_a', type: 'array', paramType: 'output', shape: '', description: '' },
     ]);
     expect(nodes.map((n) => n.label)).toEqual(['req', 'opt', 'out_b', 'out_a']);
+    // An output shows only its type. The group it sits in says it is one.
     expect(nodes.map((n) => n.detail)).toEqual([
       'required string',
       'optional string',
-      'output string',
-      'output array',
+      'string',
+      'array',
     ]);
+  });
+
+  it('splits a method into an Inputs group and an Outputs group', () => {
+    const path = { provider: 'a', service: 'b', resource: 'c', method: 'm' };
+    const [inputs, outputs] = methodGroupNodes(path, [
+      { name: 'out_b', type: 'string', paramType: 'output', shape: '', description: '' },
+      { name: 'opt', type: 'string', paramType: 'input_optional', shape: '', description: '' },
+      { name: 'req', type: 'string', paramType: 'input_required', shape: '', description: '' },
+      { name: 'out_a', type: 'array', paramType: 'output', shape: '', description: '' },
+    ]);
+    expect(inputs).toMatchObject({
+      kind: 'inputsGroup',
+      label: 'Inputs',
+      detail: '2, 1 required',
+      expandable: true,
+      copyText: null,
+    });
+    expect(inputs?.children?.map((n) => n.label)).toEqual(['req', 'opt']);
+    expect(outputs).toMatchObject({
+      kind: 'outputsGroup',
+      label: 'Outputs',
+      detail: '2',
+      expandable: true,
+    });
+    expect(outputs?.children?.map((n) => n.label)).toEqual(['out_b', 'out_a']);
+    expect(inputs?.id).not.toBe(outputs?.id);
+  });
+
+  it('shows an empty group as one that cannot be opened', () => {
+    const path = { provider: 'a', service: 'b', resource: 'c', method: 'm' };
+    const [inputs, outputs] = methodGroupNodes(path, [
+      { name: 'req', type: 'string', paramType: 'input_required', shape: '', description: '' },
+    ]);
+    expect(inputs).toMatchObject({ detail: '1, 1 required', expandable: true });
+    expect(outputs).toMatchObject({ detail: 'none', expandable: false });
+    expect(outputs?.children).toEqual([]);
   });
 
   it('gives the same parameter name distinct ids as input and output', () => {
@@ -182,8 +220,33 @@ describe('loadChildren', () => {
     if (!method) {
       throw new Error('fixture missing');
     }
-    await loadChildren(method, explorer);
+    const groups = await loadChildren(method, explorer);
     expect(explorer.methodFields).toHaveBeenCalledWith('p', 's', 'r', 'get');
+    expect(groups.map((n) => n.kind)).toEqual(['inputsGroup', 'outputsGroup']);
+  });
+
+  it('opens a method group from the fields it already holds', async () => {
+    const explorer = api({
+      methodFields: vi.fn(() =>
+        Promise.resolve([
+          { name: 'org', type: 'string', paramType: 'input_required', shape: '', description: '' },
+          { name: 'id', type: 'integer', paramType: 'output', shape: '', description: '' },
+        ]),
+      ),
+    });
+    const [method] = methodNodes({ provider: 'p', service: 's', resource: 'r' }, [
+      { name: 'get', sqlVerb: 'SELECT', requiredParams: ['org'], description: '' },
+    ]);
+    if (!method) {
+      throw new Error('fixture missing');
+    }
+    const [inputs, outputs] = await loadChildren(method, explorer);
+    if (!inputs || !outputs) {
+      throw new Error('groups missing');
+    }
+    expect((await loadChildren(inputs, explorer)).map((n) => n.label)).toEqual(['org']);
+    expect((await loadChildren(outputs, explorer)).map((n) => n.label)).toEqual(['id']);
+    expect(explorer.methodFields).toHaveBeenCalledTimes(1);
   });
 
   it('has nothing under a field', async () => {
