@@ -198,6 +198,23 @@ pub fn map_providers(result: &ResultSet) -> HostResult<Vec<Provider>> {
         .collect())
 }
 
+/// Providers the explorer leaves out. The engine has one provider built
+/// in, `stackql_preview`, which is not shown for now. It is named here and
+/// nowhere else, so taking the name out brings it back.
+///
+/// Only the tree leaves it out. A statement the operator runs, such as
+/// `SHOW PROVIDERS`, still shows what the engine says, and so does what the
+/// engine tells a model.
+pub const HIDDEN_PROVIDERS: &[&str] = &["stackql_preview"];
+
+/// The providers the explorer lists.
+pub fn visible_providers(providers: Vec<Provider>) -> Vec<Provider> {
+    providers
+        .into_iter()
+        .filter(|provider| !HIDDEN_PROVIDERS.contains(&provider.name.as_str()))
+        .collect()
+}
+
 pub fn map_services(result: &ResultSet) -> HostResult<Vec<Service>> {
     let reader = Reader::new(result, "SHOW SERVICES");
     let name = reader.required("name")?;
@@ -304,6 +321,24 @@ mod tests {
                 .collect(),
             notices: Vec::new(),
         }
+    }
+
+    #[test]
+    fn the_built_in_provider_is_left_out_of_the_tree_and_nothing_else_is() {
+        let provider = |name: &str| Provider {
+            name: name.into(),
+            version: "v1".into(),
+        };
+        let shown = visible_providers(vec![
+            provider("github"),
+            provider("stackql_preview"),
+            provider("aws"),
+            // A name that only starts the same way is some other provider.
+            provider("stackql_preview_extras"),
+        ]);
+        let names: Vec<&str> = shown.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["github", "aws", "stackql_preview_extras"]);
+        assert!(visible_providers(vec![provider("stackql_preview")]).is_empty());
     }
 
     #[test]

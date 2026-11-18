@@ -208,7 +208,10 @@ pub async fn explorer_providers(state: State<'_, AppState>) -> HostResult<Vec<Pr
         .connection
         .fetch(explorer::PROVIDERS_SQL.to_string())
         .await?;
-    explorer::map_providers(&result)
+    // The tree leaves the provider built into the engine out for now.
+    Ok(explorer::visible_providers(explorer::map_providers(
+        &result,
+    )?))
 }
 
 #[tauri::command]

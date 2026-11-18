@@ -137,8 +137,9 @@ export function Explorer({ engineRunning, refreshToken, onInsert }: ExplorerProp
     [roots, expanded, children],
   );
 
-  const onlyBuiltIn =
-    roots.status === 'loaded' && roots.nodes.every((node) => node.label === 'stackql_preview');
+  // The host leaves the provider built into the engine out of the list,
+  // so an engine with nothing installed gives an empty tree.
+  const noProviders = roots.status === 'loaded' && roots.nodes.length === 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-alt">
@@ -181,8 +182,8 @@ export function Explorer({ engineRunning, refreshToken, onInsert }: ExplorerProp
                 onInsert={onInsert}
               />
             ))}
-            {onlyBuiltIn && (
-              <p className="mt-2 border-t border-line px-3 py-2 text-ink-muted">
+            {noProviders && (
+              <p className="px-3 py-2 text-ink-muted">
                 No providers are installed yet. Run{' '}
                 <code className="selectable font-mono text-ink">REGISTRY LIST;</code> in the editor
                 to see what is available, then{' '}

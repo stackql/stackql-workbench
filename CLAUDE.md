@@ -314,7 +314,8 @@ A few fixed points for the interface.
 - Every view stays mounted while another is shown, so the editor keeps its text and history and a running turn keeps its place.
 - Row results from the assistant are shown in the conversation, first rows only, with a way to open the full result in the grid.
 - Replies are read as markdown by a small reader in `src/lib/markdown.ts` that builds a tree. Model output is never turned into HTML. Links are shown and never opened.
-- Under a method the explorer groups fields into Inputs and Outputs, both collapsed until opened.
+- Under a method the explorer groups fields into Inputs and Outputs, both collapsed until opened. A field is an input when the engine's param type starts with `input`, and an output otherwise.
+- The explorer does not list `stackql_preview`, the provider built into the engine. It is hidden for now and may come back. The name is in `HIDDEN_PROVIDERS` in `query/explorer.rs` and nowhere else. Only the tree leaves it out: `SHOW PROVIDERS` in the editor and the engine's answers to a model are not filtered.
 - Nested JSON is common in results. The grid needs a cell viewer for it.
 
 ## Conventions
