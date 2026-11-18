@@ -229,6 +229,20 @@ server process after its stdin closed: Ok(Ok(ExitStatus(ExitStatus(0))))
 
 The supervisor still kills the process if it is alive after that, and the job object or watchdog covers a force quit.
 
+## Tool calls at the same time
+
+This was measured on 18 November 2026, after the rest of this report, to see whether independent statements can usefully be sent together. One `stackql mcp` server, v1.0.888, default flags, no provider credentials. Each statement makes one provider request: `SELECT login FROM github.orgs.orgs WHERE org = '...'`, with a different name each time so nothing could be answered from a cache.
+
+| Run | Four statements, one after another | Four statements, sent together |
+|---|---|---|
+| 1 | 1344 ms | 2760 ms, with three answers by 339 ms and one late |
+| 2 | 1315 ms | 376 ms |
+| 3 | 1462 ms | 398 ms |
+
+So one server does run tool calls at the same time: four together took about as long as one. The late answer in the first run was not explained. This is three runs of small statements, not a load test, and statements that fan out to many provider requests were not tried.
+
+The host's own loop does not use this yet. It runs the tool calls of one model reply one after another.
+
 ## Open items for the maintainer
 
 - Nothing is open on provider errors. The first version of this report asked for an error result from the server, which it already gives. See the correction above.
