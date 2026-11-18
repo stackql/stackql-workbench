@@ -75,7 +75,9 @@ These follow from the findings.
 
 ## Subagents
 
-This was tested on 18 November 2026, on the same versions, to see whether the CLI's subagents can be allowed without giving up the restriction to the engine. Three prompts were sent to the probe and one through the app.
+This was tested on 18 November 2026, on the same versions, to see whether the CLI's subagents can be allowed without giving up the restriction to the engine. Three prompts were sent to the probe and two through the app.
+
+The short version: allowing them is safe, and it is not yet dependable. They are off unless the operator turns them on.
 
 The CLI has a `task` tool that starts a subagent. It is one of the tools the restriction above turns off. Adding `task` to `--available-tools` brings it back and nothing else.
 
@@ -102,13 +104,19 @@ So the restriction holds for every kind, and only two of them are of use here. T
 
 A subagent that lacks a tool for its job tends to start a `task` subagent to try again, even when told not to. That is what the depth limit catches.
 
+After the agent was told which kind to use, the same question was asked again without naming subagents. The model did the two lookups itself, at the same time, and got a large result. The CLI keeps a large tool result in a temporary file and tells the model to read it, and the model has no tool that reads files here. It then started a subagent to count the result. That subagent could not read the file either and started another, four deep, twice. Ten subagents ran, the turn took 108 seconds, and the count it gave was wrong. Earlier, the same question had been answered correctly in 27 seconds.
+
+So what the model reached for subagents to do was not the dividing of independent work. It was a way out when it was stuck, and with the `task` tool to hand a stuck model costs more than without it. That was one small model, `claude-haiku-4.5`. A larger one was not tried.
+
 What the host does with this:
 
-- Adds `task` to the tool list when subagents are on. That is a setting, on unless the operator turns it off.
+- Leaves subagents off unless the operator turns them on in settings, where the setting is marked experimental.
+- Adds `task` to the tool list when they are on.
 - Tells the agent in the first prompt when to use them: for independent lookups only, never for a change, no more than four at once, and not from inside a subagent.
 - Tells it how: `agent_type` `general-purpose`, `mode` `sync`, started in one step so they run together, and not the `explore` kind or background mode.
 - Shows the start of a subagent with its task, and marks each tool call with the subagent that made it.
 - Leaves a subagent's own message text out of the conversation. It arrives whole as the result of the call that started the subagent.
+- Stops a turn in which a subagent starts a subagent of its own, at the first one, and says why. In every run where that happened the subagent had been unable to do its job.
 - Stops a turn that starts more than 12 subagents, and says why.
 
 ## Limits

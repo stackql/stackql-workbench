@@ -41,7 +41,7 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
   const [model, setModel] = useState(config.inference?.model ?? '');
   const [baseUrl, setBaseUrl] = useState(config.inference?.baseUrl ?? '');
   const [program, setProgram] = useState(config.inference?.program ?? '');
-  const [subagents, setSubagents] = useState(config.inference?.subagents ?? true);
+  const [subagents, setSubagents] = useState(config.inference?.subagents ?? false);
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -269,13 +269,16 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
                   }}
                 />
                 <span>
-                  <span className="font-semibold">Split independent lookups across subagents</span>
+                  <span className="font-semibold">
+                    Split independent lookups across subagents (experimental)
+                  </span>
                   <span className="block text-ink-muted">
                     For a request that spans several providers, services or resources, the agent may
                     hand each part to a subagent and run them at the same time. A subagent gets the
-                    engine tools and nothing else, on the same engine and safety mode. It is asked
-                    to run on the model above, though the CLI can pick another for some kinds of
-                    subagent. A turn that starts more than 12 is stopped.
+                    engine tools and nothing else, on the same engine and safety mode. In testing, a
+                    small model also reached for subagents when it was stuck, which made a turn
+                    slower and no better, so this is off unless you turn it on. A turn is stopped if
+                    a subagent starts subagents of its own, or if more than 12 are started.
                   </span>
                 </span>
               </label>

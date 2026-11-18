@@ -30,13 +30,11 @@ pub struct InferenceSettings {
     #[serde(default)]
     pub program: Option<String>,
     /// For a delegated agent: whether it may split independent lookups
-    /// across subagents. On unless the operator turns it off.
-    #[serde(default = "enabled")]
+    /// across subagents. Off unless the operator turns it on. In testing a
+    /// model also reached for subagents when it was stuck, which made a
+    /// turn slower and no better. See `docs/spike-acp.md`.
+    #[serde(default)]
     pub subagents: bool,
-}
-
-fn enabled() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -295,12 +293,21 @@ mod tests {
     }
 
     #[test]
-    fn subagents_are_on_for_settings_saved_before_the_choice_existed() {
+    fn subagents_are_off_unless_the_operator_turned_them_on() {
         let path = temp_file("subagents");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // Saved before the choice existed.
         std::fs::write(
             &path,
             r#"{ "inference": { "kind": "github_copilot", "model": "" } }"#,
+        )
+        .unwrap();
+        let inference = SettingsStore::load(path.clone()).get().inference.unwrap();
+        assert!(!inference.subagents);
+
+        std::fs::write(
+            &path,
+            r#"{ "inference": { "kind": "github_copilot", "model": "", "subagents": true } }"#,
         )
         .unwrap();
         let inference = SettingsStore::load(path.clone()).get().inference.unwrap();

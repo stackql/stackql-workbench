@@ -541,6 +541,19 @@ impl Turn {
             .and_then(Value::as_str);
         let id = id.to_string();
         self.subagent(&id, name);
+
+        // A subagent that starts a subagent was told not to. In testing it
+        // was always one that could not do its job and tried to hand it on,
+        // four deep, at a cost in time and no gain. Stop at the first.
+        let nested = params
+            .pointer("/data/parentId")
+            .is_some_and(|parent| !parent.is_null());
+        if nested && self.abort.is_none() {
+            self.abort = Some(format!(
+                "Stopped: a {} subagent started a subagent of its own, which usually means it could not do what it was asked. Ask again in smaller steps, or turn subagents off in Settings.",
+                self.profile.name
+            ));
+        }
     }
 
     /// Takes one message from the agent. Returns the answer when the
@@ -1343,6 +1356,51 @@ mod tests {
         assert_eq!(notices.len(), 1, "{notices:?}");
         assert!(notices[0].contains("subagents"), "{}", notices[0]);
         assert!(notices[0].contains("Settings"), "{}", notices[0]);
+    }
+
+    #[tokio::test]
+    async fn a_subagent_that_starts_a_subagent_stops_the_turn() {
+        let (mut session, mut agent) = opened(None).await;
+        let (emit, events) = collector();
+        let stop = Notify::new();
+        let turn = tokio::spawn(async move { session.prompt("count them", &stop, &emit).await });
+        let (prompt_id, _) = agent.expect("session/prompt").await;
+
+        // A subagent started by the main agent is fine.
+        agent
+            .send(json!({
+                "jsonrpc": "2.0", "method": "example.com/agent/sessionEvent",
+                "params": { "sessionId": "s1", "type": "subagent.started", "agentId": "a1",
+                    "data": { "agentDisplayName": "count" } }
+            }))
+            .await;
+        // One started by that subagent is not.
+        agent
+            .send(json!({
+                "jsonrpc": "2.0", "method": "example.com/agent/sessionEvent",
+                "params": { "sessionId": "s1", "type": "subagent.started", "agentId": "a2",
+                    "data": { "agentDisplayName": "count again", "parentId": "a1" } }
+            }))
+            .await;
+        let message = agent.receive().await;
+        assert_eq!(message["method"], "session/cancel");
+        agent
+            .result(prompt_id, json!({ "stopReason": "cancelled" }))
+            .await;
+
+        let summary = turn.await.unwrap().unwrap();
+        assert!(summary.stopped);
+        let notices: Vec<String> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::Notice { message } => Some(message.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert!(notices[0].contains("subagent of its own"), "{}", notices[0]);
     }
 
     #[tokio::test]
