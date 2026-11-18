@@ -194,3 +194,9 @@ export const Table = (p: IconProps) => (
     <path d="M2 6.5h12M2 9.75h12M6.5 3v10" />
   </Svg>
 );
+
+export const Plus = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 3v10M3 8h10" />
+  </Svg>
+);

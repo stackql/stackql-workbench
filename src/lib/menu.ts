@@ -3,6 +3,7 @@
 
 export type CommandId =
   | 'newChat'
+  | 'newTab'
   | 'showChat'
   | 'showExplorer'
   | 'showActivity'
@@ -51,6 +52,7 @@ export const MENUS: Menu[] = [
     label: 'File',
     entries: [
       command('newChat', 'New Chat', { key: 'n' }),
+      command('newTab', 'New Query Tab', { key: 't' }),
       separator,
       command('openModelSettings', 'Model Backend...'),
       command('openSettings', 'Settings...', { key: ',' }),

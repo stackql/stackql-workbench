@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { host } from './host';
 import { chatTitle, type ToolItem } from './lib/chat';
 import { commandForKey, type CommandId } from './lib/menu';
 import { agentRun, type RunState } from './lib/results';
 import { ActivityPane } from './panes/activity/ActivityPane';
 import { ChatPane } from './panes/chat/ChatPane';
-import { Editor, type EditorHandle } from './panes/editor/Editor';
+import { Editor } from './panes/editor/Editor';
+import { TabStrip } from './panes/editor/TabStrip';
 import { Explorer } from './panes/explorer/Explorer';
 import { Results } from './panes/results/Results';
 import { ChatSettings } from './panes/settings/ChatSettings';
@@ -17,10 +18,9 @@ import { StatusBar } from './panes/statusbar/StatusBar';
 import { useAgent, type AgentResult } from './state/useAgent';
 import { useEngineStatus } from './state/useEngineStatus';
 import { useQueryRun } from './state/useQueryRun';
+import { useTabs } from './state/useTabs';
 import { Play } from './ui/icons';
 import { Splitter } from './ui/Splitter';
-
-const EDITOR_TEXT_KEY = 'workbench.editor.text';
 
 const WELCOME_TEXT = `-- Ctrl+Enter (Cmd+Enter on macOS) runs the selection, or everything when nothing is selected.
 
@@ -30,14 +30,6 @@ SHOW PROVIDERS;
 -- REGISTRY LIST;
 -- REGISTRY PULL github;
 `;
-
-function savedEditorText(): string {
-  try {
-    return window.localStorage.getItem(EDITOR_TEXT_KEY) ?? WELCOME_TEXT;
-  } catch {
-    return WELCOME_TEXT;
-  }
-}
 
 const IS_MAC = /Mac/i.test(navigator.userAgent);
 const RUN_SHORTCUT = IS_MAC ? 'Cmd+Enter' : 'Ctrl+Enter';
@@ -72,7 +64,7 @@ function resultRun(result: {
 export function App() {
   const status = useEngineStatus();
   const query = useQueryRun();
-  const editor = useRef<EditorHandle>(null);
+  const tabs = useTabs(WELCOME_TEXT);
 
   // Chat is where the app opens. The explorer and activity are a click away.
   const [view, setView] = useState<View>('chat');
@@ -83,7 +75,6 @@ export function App() {
   const [settings, setSettings] = useState<'engine' | 'model' | null>(null);
   const [restarting, setRestarting] = useState(false);
   const [explorerToken, setExplorerToken] = useState(0);
-  const [initialText] = useState(savedEditorText);
   // A result the assistant produced, shown in the grid until the operator runs something.
   const [agentResult, setAgentResult] = useState<RunState | null>(null);
   const [runsEnded, setRunsEnded] = useState(0);
@@ -134,21 +125,18 @@ export function App() {
       });
   }, []);
 
-  const saveText = useCallback((text: string) => {
-    try {
-      window.localStorage.setItem(EDITOR_TEXT_KEY, text);
-    } catch {
-      // Storage is a convenience. Losing it is not worth interrupting anyone.
-    }
-  }, []);
+  const { open: openTab, active: activeEditor } = tabs;
 
-  // Statements from the assistant or from the activity list go into the
-  // editor as text. Nothing runs until the operator runs it.
-  const openInEditor = useCallback((sql: string) => {
-    const statement = sql.trim();
-    setView('explorer');
-    editor.current?.insert(`\n${statement}${statement.endsWith(';') ? '' : ';'}\n`);
-  }, []);
+  // A statement from the assistant, the activity list or the explorer opens
+  // in a tab of its own. Nothing runs until the operator runs it.
+  const openInEditor = useCallback(
+    (sql: string) => {
+      const statement = sql.trim();
+      setView('explorer');
+      openTab(`${statement}${statement.endsWith(';') ? '' : ';'}\n`);
+    },
+    [openTab],
+  );
 
   const showTable = useCallback((item: ToolItem) => {
     if (item.table) {
@@ -191,6 +179,10 @@ export function App() {
         case 'newChat':
           newChat();
           break;
+        case 'newTab':
+          setView('explorer');
+          openTab();
+          break;
         case 'showChat':
           setView('chat');
           break;
@@ -222,8 +214,8 @@ export function App() {
         case 'undo':
         case 'redo':
           // The editor keeps its own history, which the webview's does not see.
-          if (editor.current?.hasFocus()) {
-            editor.current[id]();
+          if (activeEditor()?.hasFocus()) {
+            activeEditor()?.[id]();
           } else {
             editInPlace(id);
           }
@@ -235,7 +227,7 @@ export function App() {
           break;
       }
     },
-    [newChat, restart],
+    [newChat, restart, openTab, activeEditor],
   );
 
   useEffect(() => {
@@ -311,7 +303,7 @@ export function App() {
               <Explorer
                 engineRunning={engineRunning}
                 refreshToken={explorerToken}
-                onInsert={(text) => editor.current?.insert(text)}
+                onInsert={(text) => activeEditor()?.insert(text)}
               />
             </div>
             <Splitter
@@ -323,28 +315,56 @@ export function App() {
             />
 
             <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-surface-alt px-2">
+              <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-surface-alt pl-2">
                 <button
                   type="button"
-                  className="flex h-6 items-center gap-1 rounded bg-brand px-2 font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+                  className="flex h-6 shrink-0 items-center gap-1 rounded bg-brand px-2 font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
                   disabled={!engineRunning || running}
                   title={`Run the selection, or everything when nothing is selected (${RUN_SHORTCUT})`}
                   onClick={() => {
-                    run(editor.current?.runText() ?? '');
+                    run(activeEditor()?.runText() ?? '');
                   }}
                 >
                   <Play />
                   Run
                 </button>
-                <span className="text-ink-muted">{RUN_SHORTCUT}</span>
-                <span className="flex-1" />
+                <TabStrip
+                  tabs={tabs.tabs}
+                  activeId={tabs.activeId}
+                  onActivate={tabs.activate}
+                  onClose={tabs.close}
+                  onNew={() => {
+                    openTab();
+                  }}
+                />
                 {!engineRunning && (
-                  <span className="text-ink-muted">Statements can run once the engine is up.</span>
+                  <span className="shrink-0 pr-2 text-ink-muted">
+                    Statements can run once the engine is up.
+                  </span>
                 )}
               </div>
 
+              {/* One editor per tab, all mounted, so each keeps its own
+                  history and cursor while another is in front. */}
               <div className="shrink-0" style={{ height: editorHeight }}>
-                <Editor ref={editor} initialText={initialText} onRun={run} onChange={saveText} />
+                {tabs.tabs.map((tab) => (
+                  <div
+                    key={tab.id}
+                    role="tabpanel"
+                    className={tab.id === tabs.activeId ? 'h-full' : 'hidden'}
+                  >
+                    <Editor
+                      ref={(handle) => {
+                        tabs.register(tab.id, handle);
+                      }}
+                      initialText={tabs.initialText(tab.id)}
+                      onRun={run}
+                      onChange={(text) => {
+                        tabs.changed(tab.id, text);
+                      }}
+                    />
+                  </div>
+                ))}
               </div>
               <Splitter
                 orientation="horizontal"
