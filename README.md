@@ -246,7 +246,7 @@ What the engine actually does on each channel is recorded in [docs/spike-pgwire.
 
 ## Roadmap
 
-Milestones are delivered in order where they depend on each other. Each one leaves the app in a usable state. M0 is done, and the core of M3 was built ahead of M1 and M2 so that both the IDE and chat could be tried together. The first delegated agent from M5, the GitHub Copilot CLI, is also in.
+Milestones are delivered in order where they depend on each other. Each one leaves the app in a usable state. M0 is done, and the core of M3 was built ahead of M1 and M2 so that both the IDE and chat could be tried together. The first delegated agent from M5, the GitHub Copilot CLI, is also in. Most of M1 is in: tabs, completion, the JSON cell viewer, history and export. Saved `.iql` files, cancel and a streaming grid are not.
 
 | Milestone | Scope |
 |---|---|

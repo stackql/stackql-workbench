@@ -405,6 +405,15 @@ Notes on the registry and on generated statements, tested on 18 November 2026 ag
 - A `SELECT` that lists all 90 output fields of `github.repos.repos.list_for_org` ran. None of those names needed quoting.
 - Request body fields of the GitHub provider are reported with a `data__` prefix, for example `data__name`. A generated statement uses the reported names as they are, which is what the engine's own guidance asks for.
 
+Notes on `stackql exec` from a shell, tested the same day. They are behind the "Copy as CLI" command, which is not on the pg wire channel but is recorded here with the other engine findings:
+
+- `exec` does not read a statement from standard input, although `--infile` says its default is `stdin`. With no statement it prints its usage. `-i -` is read as a file named `-`.
+- A statement that starts with a `--` comment is read as a flag and refused with `unknown flag`. Putting `--` before the statement fixes that. A comment further down the statement is fine.
+- Several statements in one argument run in order.
+- Windows PowerShell 5.1 and PowerShell 7 pass a double quote inside an argument differently. With `"` written as it is, 5.1 drops the quotes and 7.7 keeps them. With `\"`, 5.1 keeps them and 7.7 passes the backslash through, which the engine refuses. No one spelling works in both.
+- A statement written to a file from a single-quoted here-string and passed with `-i` works in both, whatever it contains.
+- What the app produces was run in Windows PowerShell 5.1.26100 and PowerShell 7.7.0 against the real engine, with a plain statement, a statement of several lines with a leading comment, one with double quotes, and two statements. In a POSIX shell under WSL the arguments were checked with a stand-in program, including a path with a single quote in it.
+
 ## Readiness
 
 The engine was started five times and polled, with each connect attempt limited to 40 ms.

@@ -93,6 +93,8 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 /// Starts the app. Does not return until the app exits.
 pub fn run() {
     let built = tauri::Builder::default()
+        // The save dialog, used from the host only. The webview has no access to it.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| setup(app))
         .invoke_handler(tauri::generate_handler![
             ipc::engine_status,
@@ -120,6 +122,7 @@ pub fn run() {
             ipc::agent_reset,
             ipc::agent_delegate_info,
             ipc::activity_list,
+            ipc::save::save_text_file,
         ])
         .build(tauri::generate_context!());
 

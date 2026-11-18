@@ -9,7 +9,8 @@ interface PopoverProps {
   /** Where the panel opens relative to the trigger. */
   placement?: 'top' | 'bottom';
   align?: 'start' | 'end';
-  children: ReactNode;
+  /** The panel's content. A function is given a way to close the panel. */
+  children: ReactNode | ((close: () => void) => ReactNode);
 }
 
 /** A button that opens a small panel beside it. Esc or a click elsewhere closes it. */
@@ -72,7 +73,11 @@ export function Popover({
             placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'
           } ${align === 'end' ? 'right-0' : 'left-0'}`}
         >
-          {children}
+          {typeof children === 'function'
+            ? children(() => {
+                setOpen(false);
+              })
+            : children}
         </div>
       )}
     </span>

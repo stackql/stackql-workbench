@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { host } from './host';
+import { copyText } from './host/clipboard';
 import { chatTitle, type ToolItem } from './lib/chat';
+import { execCommand } from './lib/cli';
+import { EMPTY_CATALOG, sampleStatement, type Catalog } from './lib/completion';
 import { commandForKey, type CommandId } from './lib/menu';
 import { agentRun, type RunState } from './lib/results';
 import { ActivityPane } from './panes/activity/ActivityPane';
 import { ChatPane } from './panes/chat/ChatPane';
 import { Editor } from './panes/editor/Editor';
+import { HistoryList } from './panes/editor/HistoryList';
 import { TabStrip } from './panes/editor/TabStrip';
 import { Explorer, type ExplorerHandle } from './panes/explorer/Explorer';
 import { Results } from './panes/results/Results';
@@ -19,7 +23,9 @@ import { useAgent, type AgentResult } from './state/useAgent';
 import { useEngineStatus } from './state/useEngineStatus';
 import { useQueryRun } from './state/useQueryRun';
 import { useTabs } from './state/useTabs';
-import { Play } from './ui/icons';
+import { IconButton, ICON_BUTTON_CLASS } from './ui/IconButton';
+import { Check, History, Play, Terminal, Warning } from './ui/icons';
+import { Popover } from './ui/Popover';
 import { Splitter } from './ui/Splitter';
 
 const WELCOME_TEXT = `-- Ctrl+Enter (Cmd+Enter on macOS) runs the selection, or everything when nothing is selected.
@@ -93,6 +99,10 @@ export function App() {
   // A result the assistant produced, shown in the grid until the operator runs something.
   const [agentResult, setAgentResult] = useState<RunState | null>(null);
   const [runsEnded, setRunsEnded] = useState(0);
+  // What the explorer has loaded. The editor completes names from it.
+  const catalog = useRef<Catalog>(EMPTY_CATALOG);
+  const [providers, setProviders] = useState<string[]>([]);
+  const [cliCopy, setCliCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   const showAgentResult = useCallback((result: AgentResult) => {
     // Results with no columns have nothing to put in a grid.
@@ -160,6 +170,52 @@ export function App() {
     },
     [openTab],
   );
+
+  const getCatalog = useCallback(() => catalog.current, []);
+  const keepCatalog = useCallback((next: Catalog) => {
+    catalog.current = next;
+    setProviders((current) =>
+      current.length === next.providers.length &&
+      current.every((name, index) => name === next.providers[index])
+        ? current
+        : next.providers,
+    );
+  }, []);
+  const sample = useMemo(() => sampleStatement(providers), [providers]);
+
+  // A stackql exec command for what Run would run, for the operator's shell.
+  const copyAsCli = useCallback(() => {
+    const sql = activeEditor()?.runText() ?? '';
+    const binary = status.location;
+    if (sql.trim() === '' || binary === null) {
+      return;
+    }
+    void host
+      .settingsGet()
+      .then(
+        (view) => view.settings.envFile,
+        () => null,
+      )
+      .then((envFile) =>
+        copyText(
+          execCommand(IS_MAC ? 'posix' : 'powershell', {
+            binary,
+            approot: status.dataFolder,
+            envFile,
+            sql,
+          }),
+        ),
+      )
+      .then((ok) => {
+        setCliCopy(ok ? 'copied' : 'failed');
+        window.setTimeout(
+          () => {
+            setCliCopy('idle');
+          },
+          ok ? 1200 : 4000,
+        );
+      });
+  }, [activeEditor, status.location, status.dataFolder]);
 
   const showTable = useCallback((item: ToolItem) => {
     if (item.table) {
@@ -341,6 +397,7 @@ export function App() {
                   }
                   run(sql);
                 }}
+                onCatalog={keepCatalog}
               />
             </div>
             <Splitter
@@ -377,10 +434,50 @@ export function App() {
                   }}
                 />
                 {!engineRunning && (
-                  <span className="shrink-0 pr-2 text-ink-muted">
+                  <span className="shrink-0 text-ink-muted">
                     Statements can run once the engine is up.
                   </span>
                 )}
+                <span className="flex shrink-0 items-center gap-0.5 pr-1">
+                  <Popover
+                    label="Statement history"
+                    align="end"
+                    trigger={<History />}
+                    triggerClassName={ICON_BUTTON_CLASS}
+                  >
+                    {(close) => (
+                      <HistoryList
+                        canRun={engineRunning && !running}
+                        onOpen={(sql) => {
+                          close();
+                          openInEditor(sql);
+                        }}
+                        onRun={(sql) => {
+                          close();
+                          openInEditor(sql);
+                          run(sql);
+                        }}
+                      />
+                    )}
+                  </Popover>
+                  <IconButton
+                    label={
+                      cliCopy === 'failed'
+                        ? 'Could not copy to the clipboard'
+                        : 'Copy as CLI: a stackql exec command for this statement'
+                    }
+                    disabled={status.location === null}
+                    onClick={copyAsCli}
+                  >
+                    {cliCopy === 'copied' ? (
+                      <Check className="text-ok" />
+                    ) : cliCopy === 'failed' ? (
+                      <Warning className="text-warn" />
+                    ) : (
+                      <Terminal />
+                    )}
+                  </IconButton>
+                </span>
               </div>
 
               {/* One editor per tab, all mounted, so each keeps its own
@@ -397,6 +494,8 @@ export function App() {
                         tabs.register(tab.id, handle);
                       }}
                       initialText={tabs.initialText(tab.id)}
+                      catalog={getCatalog}
+                      sample={sample}
                       onRun={run}
                       onChange={(text) => {
                         tabs.changed(tab.id, text);

@@ -3,6 +3,8 @@
 //! This is the whole surface between the webview and the host. The webview
 //! side is `src/host/`, the only place in the webview that touches Tauri.
 
+pub mod save;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 

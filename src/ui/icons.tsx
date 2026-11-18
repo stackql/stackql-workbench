@@ -215,6 +215,19 @@ export const GoTo = (p: IconProps) => (
   </Svg>
 );
 
+export const Download = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 2.5v7.5M4.75 7 8 10.25 11.25 7M3 13.25h10" />
+  </Svg>
+);
+
+export const Terminal = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="3" width="12" height="10" rx="1.5" />
+    <path d="m4.75 6.5 2 1.75-2 1.75M8.5 10.25h2.75" />
+  </Svg>
+);
+
 export const Search = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="7" cy="7" r="4" />

@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { host, toHostError, type ProviderIcon } from '../../host';
 import { copyText } from '../../host/clipboard';
+import { EMPTY_CATALOG, catalogFrom, type Catalog } from '../../lib/completion';
 import {
   compareVersions,
   filterRows,
@@ -106,6 +107,8 @@ interface ExplorerProps {
   onOpenStatement: (sql: string) => void;
   /** Runs a statement on the operator's channel, in a new tab when asked. */
   onRunStatement: (sql: string, inTab: boolean) => void;
+  /** Told what has been loaded, each time that changes. */
+  onCatalog?: (catalog: Catalog) => void;
 }
 
 interface OpenMenu {
@@ -124,6 +127,7 @@ export function Explorer({
   onInsert,
   onOpenStatement,
   onRunStatement,
+  onCatalog,
 }: ExplorerProps) {
   const [roots, setRoots] = useState<ChildState>({ status: 'loading' });
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -210,6 +214,10 @@ export function Explorer({
       }
     })();
   }, [engineRunning, refreshToken, manualRefresh]);
+
+  useEffect(() => {
+    onCatalog?.(roots.status === 'loaded' ? catalogFrom(roots.nodes, children) : EMPTY_CATALOG);
+  }, [roots, children, onCatalog]);
 
   /** The children of a node, from what is loaded or from the engine. */
   const ensure = useCallback((node: TreeNode): Promise<TreeNode[]> => {

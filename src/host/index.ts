@@ -131,6 +131,13 @@ export const host = {
   /** Closes the window, which ends the app and stops the engine. */
   closeWindow: () => getCurrentWindow().close(),
 
+  /**
+   * Asks the operator where to save `contents` and writes it there.
+   * Resolves to the path, or to null when the dialog was dismissed.
+   */
+  saveTextFile: (suggestedName: string, kind: 'csv' | 'json' | 'jsonl', contents: string) =>
+    invoke<string | null>('save_text_file', { suggestedName, kind, contents }),
+
   /** What was run recently, by the operator and by the agent. */
   activity: (limit?: number) => invoke<Activity>('activity_list', { limit }),
 

@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react';
+import { host, toHostError } from '../../host';
+import { copyText } from '../../host/clipboard';
+import { exportFileName, toCsv, toJson, toMarkdownTable } from '../../lib/exportResult';
 import {
   attentionCount,
   formatElapsed,
@@ -8,8 +11,9 @@ import {
   type RunState,
   type StatementResult,
 } from '../../lib/results';
+import { ContextMenu } from '../../ui/ContextMenu';
 import { IconButton } from '../../ui/IconButton';
-import { Panel, Spinner, Warning } from '../../ui/icons';
+import { Download, Panel, Spinner, Warning } from '../../ui/icons';
 import { Splitter } from '../../ui/Splitter';
 import { CellViewer } from './CellViewer';
 import { Grid, type CellRef } from './Grid';
@@ -34,6 +38,9 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
   const [selected, setSelected] = useState<CellRef | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerWidth, setViewerWidth] = useState(380);
+  const [exportAt, setExportAt] = useState<{ x: number; y: number } | null>(null);
+  // What the last export or copy did.
+  const [note, setNote] = useState<{ text: string; failed: boolean } | null>(null);
 
   const withResults = run.statements.filter((s) => s.columns !== null && s.columns.length > 0);
   const statement =
@@ -46,6 +53,37 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
   const selectedValue =
     selected && statement ? (statement.rows[selected.row]?.[selected.column] ?? null) : null;
   const selectedColumn = selected && columns ? (columns[selected.column] ?? '') : '';
+
+  const save = (kind: 'csv' | 'json') => {
+    if (!statement || !columns) {
+      return;
+    }
+    const text = kind === 'csv' ? toCsv(columns, statement.rows) : toJson(columns, statement.rows);
+    host.saveTextFile(exportFileName(kind, new Date()), kind, text).then(
+      (path) => {
+        if (path !== null) {
+          setNote({ text: `Saved ${path}`, failed: false });
+        }
+      },
+      (error: unknown) => {
+        setNote({ text: toHostError(error).message, failed: true });
+      },
+    );
+  };
+
+  const copyMarkdown = () => {
+    if (!statement || !columns) {
+      return;
+    }
+    const rows = statement.rows;
+    void copyText(toMarkdownTable(columns, rows)).then((ok) => {
+      setNote(
+        ok
+          ? { text: `Copied ${formatRowCount(rows.length)} as a Markdown table`, failed: false }
+          : { text: 'Could not copy to the clipboard.', failed: true },
+      );
+    });
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
@@ -99,7 +137,31 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
             Assistant
           </span>
         )}
+        {note !== null && (
+          <span
+            role="status"
+            title={note.text}
+            className={`selectable max-w-[45%] truncate ${note.failed ? 'text-danger' : 'text-ink-muted'}`}
+          >
+            {note.text}
+          </span>
+        )}
         <RunStatus run={run} statement={statement} onStopWaiting={onStopWaiting} />
+        {hasGrid && tab === 'results' && !run.running && (
+          <button
+            type="button"
+            title="Export or copy the result"
+            aria-label="Export or copy the result"
+            aria-haspopup="menu"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-muted hover:bg-surface-sunken hover:text-ink"
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              setExportAt({ x: box.right - 200, y: box.bottom + 2 });
+            }}
+          >
+            <Download />
+          </button>
+        )}
         {hasGrid && tab === 'results' && (
           <IconButton
             label={viewerOpen ? 'Hide cell viewer' : 'Show cell viewer'}
@@ -112,6 +174,32 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
           </IconButton>
         )}
       </div>
+
+      {exportAt !== null && (
+        <ContextMenu
+          x={exportAt.x}
+          y={exportAt.y}
+          label="Export or copy the result"
+          items={[
+            {
+              label: 'Export as CSV...',
+              onSelect: () => {
+                save('csv');
+              },
+            },
+            {
+              label: 'Export as JSON...',
+              onSelect: () => {
+                save('json');
+              },
+            },
+            { label: 'Copy as Markdown table', onSelect: copyMarkdown },
+          ]}
+          onClose={() => {
+            setExportAt(null);
+          }}
+        />
+      )}
 
       <div className="min-h-0 flex-1">
         {tab === 'messages' ? (

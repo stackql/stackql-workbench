@@ -52,6 +52,8 @@ base64 = "0.23"
 rmcp = { version = "3", default-features = false, features = ["client", "transport-async-rw"] }
 # OS keychain access. keyring-core is the API; the platform stores are below.
 keyring-core = "1"
+# The system save dialog for exports. Called from host commands only.
+tauri-plugin-dialog = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

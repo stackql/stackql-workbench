@@ -1,11 +1,20 @@
+import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import { redo, undo } from '@codemirror/commands';
-import { sql, SQLDialect } from '@codemirror/lang-sql';
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { Prec } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
+import { keywordCompletionSource, SQLDialect } from '@codemirror/lang-sql';
+import { HighlightStyle, LanguageSupport, syntaxHighlighting } from '@codemirror/language';
+import { Compartment, Prec } from '@codemirror/state';
+import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
+import {
+  EMPTY_CATALOG,
+  currentStatement,
+  suggest,
+  type Catalog,
+  type Suggestion,
+} from '../../lib/completion';
+import { ident } from '../../lib/generateSql';
 
 /** Keywords of the StackQL dialect, on top of plain SQL. */
 const stackql = SQLDialect.define({
@@ -22,6 +31,56 @@ const stackql = SQLDialect.define({
   identifierQuotes: '"',
 });
 
+const COMPLETION_TYPE: Record<Suggestion['kind'], string> = {
+  provider: 'namespace',
+  service: 'namespace',
+  resource: 'class',
+  field: 'property',
+};
+
+/**
+ * Names from what the explorer has loaded. Keywords come from the SQL
+ * language itself. Nothing is fetched here.
+ */
+function namesSource(catalog: () => Catalog) {
+  return (context: CompletionContext): CompletionResult | null => {
+    const { before, statement } = currentStatement(context.state.doc.toString(), context.pos);
+    const found = suggest(catalog(), before, statement, context.explicit);
+    if (found === null) {
+      return null;
+    }
+    return {
+      from: context.pos - found.replace,
+      options: found.options.map((option) => ({
+        label: option.label,
+        type: COMPLETION_TYPE[option.kind],
+        detail: option.detail,
+        apply: ident(option.label),
+        boost: 10,
+      })),
+      validFor: /^[\w-]*$/,
+    };
+  };
+}
+
+const keywords = keywordCompletionSource(stackql, true);
+
+/** Keywords, except after a dot, where only a name can follow. */
+function keywordsSource(context: CompletionContext) {
+  return context.matchBefore(/\.[\w-]*/) ? null : keywords(context);
+}
+
+/** The SQL language with both sources of completions. */
+function language(catalog: () => Catalog) {
+  return new LanguageSupport(stackql.language, [
+    stackql.language.data.of({ autocomplete: namesSource(catalog) }),
+    stackql.language.data.of({ autocomplete: keywordsSource }),
+  ]);
+}
+
+/** Holds the text an empty editor shows, so it can change after the editor exists. */
+const sampleSlot = new Compartment();
+
 const theme = EditorView.theme({
   '&': {
     height: '100%',
@@ -37,6 +96,12 @@ const theme = EditorView.theme({
   },
   '.cm-content': { caretColor: 'var(--color-ink)', padding: '6px 0' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--color-ink)' },
+  '.cm-placeholder': { color: 'var(--color-ink-muted)', fontStyle: 'italic' },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': {
+    backgroundColor: 'var(--color-brand)',
+    color: 'var(--color-on-brand)',
+  },
+  '.cm-completionDetail': { color: 'inherit', opacity: '0.7' },
   '.cm-gutters': {
     backgroundColor: 'var(--color-surface-alt)',
     color: 'var(--color-ink-muted)',
@@ -99,6 +164,10 @@ interface EditorProps {
   /** Called on Ctrl+Enter, or Cmd+Enter on macOS. */
   onRun: (sql: string) => void;
   onChange?: (text: string) => void;
+  /** What the explorer has loaded, for completing names. */
+  catalog?: () => Catalog;
+  /** Shown while the editor is empty. */
+  sample?: string;
   ref?: Ref<EditorHandle>;
 }
 
@@ -108,18 +177,20 @@ function textToRun(view: EditorView): string {
 }
 
 /** One CodeMirror buffer with SQL highlighting. */
-export function Editor({ initialText, onRun, onChange, ref }: EditorProps) {
+export function Editor({ initialText, onRun, onChange, catalog, sample, ref }: EditorProps) {
   const container = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // The editor is created once. Later values of these props reach it through refs.
   const [startText] = useState(initialText);
   const onRunRef = useRef(onRun);
   const onChangeRef = useRef(onChange);
+  const catalogRef = useRef(catalog);
 
   useEffect(() => {
     onRunRef.current = onRun;
     onChangeRef.current = onChange;
-  }, [onRun, onChange]);
+    catalogRef.current = catalog;
+  }, [onRun, onChange, catalog]);
 
   useEffect(() => {
     const parent = container.current;
@@ -144,7 +215,8 @@ export function Editor({ initialText, onRun, onChange, ref }: EditorProps) {
           ]),
         ),
         basicSetup,
-        sql({ dialect: stackql, upperCaseKeywords: true }),
+        language(() => catalogRef.current?.() ?? EMPTY_CATALOG),
+        sampleSlot.of([]),
         syntaxHighlighting(highlighting),
         theme,
         EditorView.updateListener.of((update) => {
@@ -160,6 +232,12 @@ export function Editor({ initialText, onRun, onChange, ref }: EditorProps) {
       view.current = null;
     };
   }, [startText]);
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: sampleSlot.reconfigure(sample ? placeholder(sample) : []),
+    });
+  }, [sample]);
 
   useImperativeHandle(
     ref,

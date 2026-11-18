@@ -14,8 +14,9 @@ Pre-alpha. This much has landed on Windows.
 - The core of M3, chat: the MCP client with approvals, the agent loop, the activity pane, and API key backends for Gemini, Anthropic and OpenAI-compatible servers. Anthropic and OpenAI-compatible were M4 items and came along because the backend interface made them cheap.
 - The first delegated agent, an M5 item: the GitHub Copilot CLI, driven over the Agent Client Protocol. It uses the sign-in the CLI already has.
 - A chat-first layout: chat is the view the app opens in, with a side menu for the explorer and activity, and File, Edit and View menus.
+- Most of M1, the query IDE: editor tabs, completion from provider metadata, the JSON cell viewer, statement history, export as CSV and JSON, and a `stackql exec` command for a statement.
 
-Not started: M1 (tabs, completion, saved files, export), M2 (packaging), plan sign-in and any delegated agent other than the Copilot CLI. Replies from the API key backends are not streamed yet. Replies from the Copilot CLI are.
+Not started: the rest of M1 (saved `.iql` files, cancel, a streaming grid), M2 (packaging), plan sign-in and any delegated agent other than the Copilot CLI. Replies from the API key backends are not streamed yet. Replies from the Copilot CLI are.
 
 What has and has not been run:
 
@@ -63,6 +64,8 @@ These are the chosen defaults. Check the current stable version and API of each 
 | Lint and format | ESLint with typescript-eslint, Prettier, rustfmt, clippy |
 | Process supervision | `windows-sys` job object on Windows, process group plus a pipe watchdog on Unix |
 | Clipboard | `arboard`, write only, through a host command |
+| Save dialog | `tauri-plugin-dialog`, called from host commands only. The webview has no access to it |
+| Completion | `@codemirror/autocomplete`, with a source written in this repository |
 | HTTPS client | `reqwest` with the OS TLS stack (`native-tls`) |
 | ACP client | Written in this repository: JSON-RPC over stdio, protocol version 1, the client side only |
 | Markdown in replies | Written in this repository: a small reader that builds a tree, never HTML |
@@ -86,7 +89,7 @@ The layout is below. Keep it current as the code lands.
 stackql-workbench/
   src/                  webview (React)
     host/               typed wrappers over IPC, the only Tauri imports
-    lib/                pure logic with tests: results, cells, explorer tree, statement templates, tabs, chat, activity, menu, markdown
+    lib/                pure logic with tests: results, cells, export formats, explorer tree, statement templates, completion, tabs, history, the CLI command, chat, activity, menu, markdown
     state/              hooks that connect the host to the panes
     panes/              shell (menu bar, side menu), chat, explorer, editor, results, activity, settings, statusbar
     ui/                 small shared components
@@ -100,7 +103,7 @@ stackql-workbench/
       activity/         operator history, engine audit log reader
       icons/            provider icon lookup, fetch and cache
       config/           settings
-      ipc/              command and event definitions
+      ipc/              command and event definitions, saving an export
     examples/           pgwire_spike and mcp_spike, the probes behind the spike reports
     tests/              integration tests against a real stackql
   scripts/              test launcher
@@ -339,7 +342,11 @@ A few fixed points for the interface.
 - A statement generated from the explorer opens in a new tab and does not run. It is a template built from what the engine reports for the method, with `<name>` where a value is needed. `DESCRIBE EXTENDED` from the menu, and installing or updating a provider, run on the human channel like anything else the operator runs, so they are in the history.
 - A provider shows an update marker when `REGISTRY LIST` has a newer version than `SHOW PROVIDERS` reports. The engine asks the registry, so this needs the network. When it cannot be asked, no marker is shown.
 - A method's SQL verb is drawn as a pill before its name, in one colour for SELECT and another for the rest. The colour follows the verb the engine reports and decides nothing.
-- Nested JSON is common in results. The grid needs a cell viewer for it.
+- Nested JSON is common in results. The grid has a cell viewer for it, with pretty print and copy.
+- Completion in the editor reads only what the explorer has loaded. It asks the engine for nothing, so a level that has not been opened in the explorer offers no names. After a keyword that takes a name, and after a dot, it offers the next level of provider, service and resource. Elsewhere it offers the fields of the resources the statement names.
+- The statement history is the operator's own, from `history.jsonl`: statements only, each listed once, most recent first. A statement opens in a new tab, and runs only when the operator says so.
+- A result is exported as CSV or JSON. The webview builds the text and the host saves it where the operator chooses in the system's save dialog. In JSON an object or an array is nested and everything else stays the text the engine sent, because the engine gives no types.
+- "Copy as CLI" writes a `stackql exec` command with the full path of the binary and the engine's data folder, for PowerShell on Windows and a POSIX shell on macOS. The statement follows `--`, so one that starts with a comment is not read as a flag. In PowerShell a statement that holds a double quote goes through a temporary file, because the two PowerShell generations pass a double quote differently. The shapes are in `docs/spike-pgwire.md`.
 
 ## Conventions
 
