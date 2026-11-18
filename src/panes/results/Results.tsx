@@ -4,7 +4,7 @@ import {
   formatElapsed,
   formatRowCount,
   gridStatement,
-  looksLikeUpstreamFailure,
+  emptyWithNotice,
   type RunState,
   type StatementResult,
 } from '../../lib/results';
@@ -120,7 +120,7 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
           <EmptyState running={run.running} />
         ) : hasGrid && statement ? (
           <div className="flex h-full min-h-0 flex-col">
-            {looksLikeUpstreamFailure(statement) && (
+            {emptyWithNotice(statement) && (
               <UpstreamBanner
                 statement={statement}
                 onShow={() => {
@@ -219,8 +219,8 @@ function UpstreamBanner({ statement, onShow }: { statement: StatementResult; onS
       <Warning className="mt-0.5 shrink-0" />
       <div className="min-w-0 flex-1">
         <div>
-          No rows came back and the engine reported a problem. This is how a failed provider API
-          call appears.
+          No rows came back, and the provider answered with a message. Nothing may have matched, or
+          the call may not have succeeded.
         </div>
         <div className="selectable truncate font-mono text-[12px]">{line}</div>
       </div>

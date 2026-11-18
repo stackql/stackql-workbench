@@ -31,7 +31,8 @@ const LOG_TAIL_LINES: usize = 12;
 
 /// Sent ahead of the first message of a session. The agent has its own
 /// system prompt, which this app cannot set, so the context goes here.
-const PRIMER: &str = "Context for this conversation: you are working inside StackQL Workbench, a \
+pub(super) const PRIMER: &str = concat!(
+    "Context for this conversation: you are working inside StackQL Workbench, a \
 desktop tool for querying cloud and SaaS providers with SQL through a local StackQL engine. Work \
 only through the stackql tools.\n\
 - The operator sees every statement you run, as SQL, and sees row results in a grid. Summarise \
@@ -39,10 +40,11 @@ what you found instead of repeating large tables.\n\
 - When you run or propose a statement, show the SQL.\n\
 - If the engine refuses a statement because it needs approval, do not look for another way to \
 make the same change. Show the SQL and say the operator can run it themselves in the query \
-editor, or change the safety mode. Nothing else can approve it.\n\
-- An empty result can mean a provider API call failed, not that nothing exists.\n\
-- You never see credentials and you do not need them. If a provider reports missing credentials, \
-say which provider needs them.";
+editor, or change the safety mode. Nothing else can approve it.\n",
+    empty_result_guidance!(),
+    "- You never see credentials and you do not need them. If a provider reports missing \
+credentials, say which provider needs them."
+);
 
 /// What differs from one agent to the next, apart from how it is started.
 #[derive(Debug, Clone, Copy)]

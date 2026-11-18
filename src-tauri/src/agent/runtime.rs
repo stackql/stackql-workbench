@@ -43,7 +43,8 @@ pub(super) const MAX_UI_TEXT_CHARS: usize = 6_000;
 /// Rows beyond this are not sent to the webview for one tool result.
 const MAX_UI_ROWS: usize = 5_000;
 
-const PREAMBLE: &str = "You are the assistant inside StackQL Workbench, a desktop tool for querying \
+const PREAMBLE: &str = concat!(
+    "You are the assistant inside StackQL Workbench, a desktop tool for querying \
 cloud and SaaS providers with SQL through a local StackQL engine. You work through the tools \
 provided, which run against that engine.\n\n\
 How to work here:\n\
@@ -52,12 +53,14 @@ what you found instead of repeating large tables.\n\
 - When you run or propose a statement, show the SQL.\n\
 - Statements that change something may need the operator's approval. The tool asks for it. If the \
 operator declines, do not try again or look for another way to make the same change. Say what \
-you would have done and stop.\n\
-- An empty result can mean a provider API call failed, not that nothing exists. When a tool \
-result carries a note from the engine about a failed call, tell the operator about it.\n\
+you would have done and stop.\n",
+    empty_result_guidance!(),
+    "- When a tool result carries a note from the engine about what a provider answered, tell \
+the operator what it says.\n\
 - You never see credentials and you do not need them. If a provider reports missing credentials, \
 tell the operator which provider needs them.\n\n\
-The engine's own guidance follows.\n\n";
+The engine's own guidance follows.\n\n"
+);
 
 /// A row result, in the same shape the editor's grid uses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -642,8 +645,9 @@ pub fn content_for_model(result: &ToolResult) -> String {
     }
     if !result.engine_notes.is_empty() {
         text.push_str(
-            "\n\nNote from the engine: a provider API call failed while this ran, so an empty \
-             or short result may not mean there is no data.",
+            "\n\nNote from the engine: while this ran, a provider answered a call with the \
+             message below. An empty or short result can mean nothing matched, or that the call \
+             did not succeed.",
         );
         for note in &result.engine_notes {
             text.push_str("\n- ");
@@ -781,7 +785,9 @@ mod tests {
             &["http response status code: 404, response body: Not Found"],
         ));
         assert!(text.starts_with("**no results**"));
-        assert!(text.contains("a provider API call failed"));
+        assert!(text.contains("a provider answered a call"));
+        // The note passes on what was said. It does not rule on it.
+        assert!(text.contains("can mean nothing matched, or that the call did not succeed"));
         assert!(text.contains("http response status code: 404"));
     }
 
@@ -818,6 +824,21 @@ mod tests {
             add_usage(Usage::default(), Usage::default()),
             Usage::default()
         );
+    }
+
+    #[test]
+    fn both_prompts_carry_the_same_guidance_on_empty_results() {
+        let guidance = empty_result_guidance!();
+        assert!(PREAMBLE.contains(guidance));
+        assert!(crate::agent::delegate::PRIMER.contains(guidance));
+        assert!(guidance.contains("returned no rows"));
+        assert!(guidance.contains("unconfirmed"));
+        // The engine reaches providers over more than one protocol. The
+        // guidance must not lean on one of them.
+        let lower = guidance.to_lowercase();
+        for word in ["http", "grpc", "status code", "404", "401"] {
+            assert!(!lower.contains(word), "the guidance names {word}");
+        }
     }
 
     #[test]

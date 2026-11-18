@@ -209,7 +209,7 @@ How the host uses it:
 - The editor has one long-lived session. Each explorer statement gets its own short-lived session.
 - The explorer is built from metadata statements: `SHOW PROVIDERS`, `SHOW EXTENDED SERVICES IN`, `SHOW EXTENDED RESOURCES IN`, `SHOW EXTENDED METHODS IN`, `DESCRIBE EXTENDED` and `DESCRIBE METHOD EXTENDED`. Results are mapped by column name, not position.
 - Identifiers are validated and written in double quotes. This engine version rejects backticks. Never build statements by raw string interpolation of UI input.
-- A zero-row result that comes with a notice is treated as a probable upstream failure and shown as a warning, not as "no data".
+- A zero-row result that comes with a notice is shown with the notice beside it, not as plain "no data". The notice is what the provider answered. The UI passes it on and does not rule on it. See Empty results.
 
 ### `stackql mcp` (agent channel)
 
@@ -228,7 +228,7 @@ How the server behaves:
 - Every protocol revision the SDK offers is negotiated. The host offers `2025-11-25`, the newest one with an `initialize` handshake. On it the approval prompt is a server-initiated elicitation, the simpler of the two approval flows.
 - 15 tools. Each result carries rendered text for the model and a structured payload. Row results are `{ "rows": [...] }`, which the host turns into a table for the grid. Nothing needs to be set to get JSON: the structured payload is always there.
 - The handshake returns about 25,000 characters of guidance for the model. The host puts it in the system prompt.
-- An upstream provider failure is reported to the model as an empty result with no error. The reason is only on the server's stderr. The host watches stderr during each tool call and adds a note for the operator and for the model.
+- A provider call that returns nothing gives the model an empty result with no error, whatever the reason. What the provider said is only on the server's stderr. The host watches stderr during each tool call and passes a note on to the operator and the model. That is best effort: it knows one HTTP line, and it is absent when a delegated agent owns the server's stderr. See Empty results.
 - A statement the server cannot parse is classed `unknown` and asks for approval, even through the read tool.
 - The server exits when its stdin closes.
 
@@ -250,6 +250,15 @@ The workspace safety setting maps directly onto `server.mode`.
 "Needs approval" is implemented with MCP elicitation. The host's MCP client must advertise the elicitation capability, otherwise gated tools are refused. The approval card in the UI is the answer to the server's `elicitation/create` request. Show the exact SQL on the card. Never auto-accept.
 
 The request is a form with no fields. Its message holds the tool, the query class and the SQL. The host waits for the operator for as long as it takes. With nobody listening the answer is decline, and stopping the turn answers cancel.
+
+### Empty results
+
+This was decided by the maintainer on 18 November 2026. Do not reopen it.
+
+- The engine answers a provider call that returned nothing with an empty, successful result, on both channels. That stays. A lookup of one thing that does not exist is an ordinary question, and "not found" is its answer, not a failure of the statement.
+- The engine reaches providers over more than one protocol, gRPC among them. Nothing in the host or the UI may sort a provider's answer by HTTP status code, or call an answer a failure because of one.
+- What the host and the UI do is pass the provider's message on, where there is one, in neutral words: nothing may have matched, or the call may not have succeeded.
+- For a model the fix is instructions, not an error. The text is `empty_result_guidance!` in `src-tauri/src/agent/mod.rs`, used for both the host's loop and a delegated agent. It says what an empty result does and does not show, and to check that the provider is answering before reporting that it has none of something or acting on something being absent. The engine's own MCP instructions are the long-term home for this, and the text here should follow theirs once they carry it.
 
 ### Credentials
 
@@ -359,7 +368,6 @@ These came out of the two engine spikes and need an answer from the engine side.
 
 - `srv` has no cancel. It needs to send `BackendKeyData` and handle a cancel request before M1 can offer more than "stop waiting".
 - `srv` runs only the first statement in a message, and cuts at a semicolon inside a string literal.
-- An upstream provider failure is an empty, successful result on both channels. On the agent channel a model reasons from it.
 - Row objects from the MCP server lose the column order of the statement.
 
 The licence is decided: MIT, the same as `stackql`.

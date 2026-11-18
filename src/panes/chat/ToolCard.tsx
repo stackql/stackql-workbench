@@ -95,8 +95,8 @@ export function ToolCard({ item, onOpenInEditor, onShowTable, onAnswer }: ToolCa
               <Warning className="mt-0.5 shrink-0" />
               <div className="min-w-0">
                 <div>
-                  A provider API call failed while this ran, so an empty or short result may not
-                  mean there is no data.
+                  While this ran, a provider answered a call with the message below. An empty or
+                  short result can mean nothing matched, or that the call did not succeed.
                 </div>
                 {item.engineNotes.map((note, index) => (
                   <div

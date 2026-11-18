@@ -3,7 +3,7 @@ import type { Notice } from '../../host/types';
 import {
   formatElapsed,
   formatRowCount,
-  looksLikeUpstreamFailure,
+  emptyWithNotice,
   type RunState,
   type StatementResult,
 } from '../../lib/results';
@@ -58,7 +58,7 @@ function outcome(statement: StatementResult): string {
 }
 
 function StatementMessages({ statement }: { statement: StatementResult }) {
-  const upstream = looksLikeUpstreamFailure(statement);
+  const upstream = emptyWithNotice(statement);
   return (
     <div className="mb-3">
       <div className="flex items-start gap-2">
@@ -99,8 +99,9 @@ function StatementMessages({ statement }: { statement: StatementResult }) {
 
       {upstream && (
         <p className="mt-1 ml-6 text-warn">
-          No rows came back and the engine reported a problem. A failed provider API call looks like
-          this: the statement succeeds with an empty result.
+          No rows came back, and the provider answered with the message below. That can mean nothing
+          matched, as when you look up something that does not exist, or that the call did not
+          succeed.
         </p>
       )}
 

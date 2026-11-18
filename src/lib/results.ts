@@ -97,7 +97,7 @@ export function agentRun(
     rows,
     rowCount: rows.length,
     elapsedMs,
-    // Shown the same way as an upstream failure on the operator's channel.
+    // Shown the same way as a provider's message on the operator's channel.
     notices: engineNotes.map((note) => ({
       severity: 'NOTICE',
       code: '',
@@ -191,11 +191,13 @@ export function gridStatement(state: RunState): StatementResult | null {
 }
 
 /**
- * True when a statement succeeded with no rows but the engine attached a
- * notice. That is how a failed provider API call shows up: the engine
- * reports success with an empty result. See docs/spike-pgwire.md.
+ * True when a statement succeeded with no rows and the engine attached a
+ * notice, which carries what the provider answered. That can be an ordinary
+ * answer, such as "not found" for a lookup of one thing, or a call that did
+ * not succeed. The engine does not tell the two apart, and neither does
+ * this. The operator is shown the message. See docs/spike-pgwire.md.
  */
-export function looksLikeUpstreamFailure(statement: StatementResult): boolean {
+export function emptyWithNotice(statement: StatementResult): boolean {
   return statement.status === 'done' && statement.rows.length === 0 && statement.notices.length > 0;
 }
 

@@ -9,7 +9,7 @@ import {
   formatElapsed,
   formatRowCount,
   gridStatement,
-  looksLikeUpstreamFailure,
+  emptyWithNotice,
   startRun,
   type RunState,
 } from './results';
@@ -188,7 +188,7 @@ describe('gridStatement', () => {
   });
 });
 
-describe('looksLikeUpstreamFailure', () => {
+describe('emptyWithNotice', () => {
   const base = play([
     { event: 'statementStarted', data: { index: 0, total: 1, sql: 'SELECT x' } },
     { event: 'columns', data: { index: 0, columns: ['x'] } },
@@ -203,7 +203,7 @@ describe('looksLikeUpstreamFailure', () => {
       base,
     );
     const [statement] = state.statements;
-    expect(statement && looksLikeUpstreamFailure(statement)).toBe(true);
+    expect(statement && emptyWithNotice(statement)).toBe(true);
     expect(attentionCount(state)).toBe(1);
   });
 
@@ -213,7 +213,7 @@ describe('looksLikeUpstreamFailure', () => {
       base,
     );
     const [statement] = state.statements;
-    expect(statement && looksLikeUpstreamFailure(statement)).toBe(false);
+    expect(statement && emptyWithNotice(statement)).toBe(false);
     expect(attentionCount(state)).toBe(0);
   });
 
@@ -227,7 +227,7 @@ describe('looksLikeUpstreamFailure', () => {
       base,
     );
     const [statement] = state.statements;
-    expect(statement && looksLikeUpstreamFailure(statement)).toBe(false);
+    expect(statement && emptyWithNotice(statement)).toBe(false);
   });
 });
 

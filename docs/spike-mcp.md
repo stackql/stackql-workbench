@@ -211,6 +211,6 @@ The supervisor still kills the process if it is alive after that, and the job ob
 
 ## Open items for the maintainer
 
-- An upstream failure on the agent channel is reported to the model as an empty result. The host adds a note from stderr, but an error result from the server would be safer.
+- A provider call that returns nothing reaches the model as an empty result. The host adds a note from stderr. This report first suggested an error result from the server. The maintainer has since decided against that: an empty result is the right answer to a lookup of something that does not exist, and the engine does not sort provider answers by status code. The fix is instructions for the model. See Empty results in `CLAUDE.md`.
 - Row objects lose the column order of the statement.
 - The `list_*` tool schemas do not mark their required arguments.

@@ -23,8 +23,13 @@ use crate::connection::{AgentChannel, LogBuffer};
 use crate::error::{HostError, HostResult};
 use crate::util::truncate;
 
-/// The marker the engine puts on a stderr line when a provider API call
-/// fails. Such a failure is otherwise reported as an empty result.
+/// The marker the engine puts on a stderr line when a provider answers an
+/// HTTP call with something other than success. The result of such a call
+/// is empty, and this line is the only trace of what was said.
+///
+/// This is best effort. It knows only this one line, so a provider reached
+/// over another protocol leaves no note, and it does not judge the answer:
+/// "not found" for a lookup of one thing is an ordinary answer.
 const UPSTREAM_FAILURE_MARKER: &str = "http response status code:";
 const MAX_NOTE_CHARS: usize = 400;
 const MAX_NOTES: usize = 5;
@@ -212,8 +217,8 @@ impl McpSession {
     }
 }
 
-/// Picks the lines that report a failed provider API call, one short note
-/// per failure. The response body that follows the status is cut, since it
+/// Picks the lines that report what a provider answered, one short note
+/// per line. The response body that follows the status is cut, since it
 /// can be a whole web page.
 pub fn upstream_notes(lines: &[String]) -> Vec<String> {
     lines
