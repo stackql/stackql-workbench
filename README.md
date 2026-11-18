@@ -207,8 +207,10 @@ The app opens in chat. The side menu leads to the explorer, which holds the prov
 
 Chat needs a model backend. The first time you send a message without one, the model backend settings open. There are two kinds.
 
-- GitHub Copilot: uses the Copilot CLI installed on this machine and the sign-in it already has. Install the CLI, run `copilot login` once, then choose GitHub Copilot. Requests count against your Copilot plan, and the settings list each model with what it costs.
+- GitHub Copilot: uses the Copilot CLI installed on this machine and the sign-in it already has. Install the CLI, run `copilot login` once, then choose GitHub Copilot. Requests count against your Copilot plan, and the settings list each model with what it costs. For a request that spans several providers, the agent can hand each part to a subagent and run them together. That can be turned off in the settings.
 - An API key for Gemini, Anthropic, or an OpenAI-compatible server, which covers local inference. The key goes to the operating system keychain.
+
+With an API key backend, independent queries the model asks for in one step run at the same time.
 
 Without a backend the explorer and the query editor work as before.
 

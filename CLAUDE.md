@@ -308,6 +308,10 @@ What exists now under item 3 is the GitHub Copilot CLI. Every point was tested. 
 - A `session/request_permission` from the agent is declined and the operator is told. None is expected, and one means the agent is reaching for something outside the engine.
 - The model is chosen with `session/set_config_option`. Empty leaves the CLI's own choice. The settings pane lists the models with what each costs against the operator's plan.
 - The engine's stderr goes to the CLI, so the operator is not shown what a provider said when a lookup found nothing. Errors are not affected: they come back as tool errors on this path as on the other.
+- Subagents are allowed, as a setting that is on by default. With it on, the CLI's `task` tool is added to `--available-tools`. A subagent gets the same tools as the agent that starts it, the engine's and `task`, and uses the same MCP server, so the same safety mode. That was tested: a subagent asked for a shell and for a file write had neither.
+- The first prompt tells the agent when to use subagents: independent lookups across providers, services or resources, never a change. That direction lives here because starting agents is the client's capability. The engine cannot start one.
+- A subagent's tool calls carry its id under `_meta["github.com/copilot"]`. The host marks each call with the subagent's name, shows the start of a subagent with its task, and keeps a subagent's own message text out of the conversation. A turn that starts more than 12 subagents is stopped. The CLI itself stops nesting at depth four.
+- The CLI chooses the model a subagent runs on. It was `gpt-6-luna` when tested, whatever the session's model. What that costs was not measured.
 
 These rules hold for every backend.
 

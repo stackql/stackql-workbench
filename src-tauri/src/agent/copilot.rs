@@ -22,7 +22,14 @@ pub const PROFILE: Profile = Profile {
     name: "GitHub Copilot",
     sign_in_hint: "Run `copilot login` in a terminal, then send the message again.",
     tool_prefix: "stackql-",
+    vendor_key: "github.com/copilot",
+    // Without these the CLI gives a subagent's calls an id and no name.
+    session_events: &["subagent.started"],
 };
+
+/// The CLI's tool for starting a subagent. A subagent gets the same tools
+/// as the agent that starts it: the engine's, and this one.
+pub const SUBAGENT_TOOL: &str = "task";
 
 /// File names the CLI may have on this platform, best first.
 fn program_names() -> &'static [&'static str] {
@@ -115,8 +122,9 @@ pub fn mcp_config(server: &McpServerCommand) -> Result<Value, String> {
 }
 
 /// The arguments for `copilot`, given the configuration file and the tools
-/// the model may use.
-pub fn launch_args(config_file: &Path, tool_ids: &[String]) -> Vec<OsString> {
+/// the model may use. With `subagents` the model may also split work across
+/// subagents. They are held to the same list of tools.
+pub fn launch_args(config_file: &Path, tool_ids: &[String], subagents: bool) -> Vec<OsString> {
     let mut config = OsString::from("@");
     config.push(config_file);
     let mut args: Vec<OsString> = vec![
@@ -140,6 +148,9 @@ pub fn launch_args(config_file: &Path, tool_ids: &[String]) -> Vec<OsString> {
         "--available-tools".into(),
     ];
     args.extend(tool_ids.iter().map(OsString::from));
+    if subagents {
+        args.push(SUBAGENT_TOOL.into());
+    }
     args
 }
 
@@ -234,6 +245,7 @@ mod tests {
         let args = launch_args(
             Path::new("/data/copilot/mcp-config.json"),
             &tool_ids(&["run_select_query".to_string(), "server_info".to_string()]),
+            false,
         );
         let args: Vec<String> = args
             .iter()
@@ -257,5 +269,27 @@ mod tests {
         for forbidden in ["--allow-all", "--yolo", "--allow-all-tools", "--autopilot"] {
             assert!(!args.iter().any(|a| a == forbidden), "{forbidden} is set");
         }
+    }
+
+    #[test]
+    fn subagents_add_one_tool_and_nothing_else() {
+        let ids = tool_ids(&["run_select_query".to_string()]);
+        let file = Path::new("/data/copilot/mcp-config.json");
+        let text = |args: Vec<OsString>| -> Vec<String> {
+            args.iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        let without = text(launch_args(file, &ids, false));
+        let with = text(launch_args(file, &ids, true));
+
+        assert!(!without.contains(&"task".to_string()));
+        // The same command line, with the subagent tool on the end of the
+        // list of tools the model may use.
+        let mut expected = without.clone();
+        expected.push("task".to_string());
+        assert_eq!(with, expected);
+        let at = with.iter().position(|a| a == "--available-tools").unwrap();
+        assert_eq!(&with[at + 1..], ["stackql-run_select_query", "task"]);
     }
 }

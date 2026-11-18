@@ -29,6 +29,14 @@ pub struct InferenceSettings {
     /// `PATH`.
     #[serde(default)]
     pub program: Option<String>,
+    /// For a delegated agent: whether it may split independent lookups
+    /// across subagents. On unless the operator turns it off.
+    #[serde(default = "enabled")]
+    pub subagents: bool,
+}
+
+fn enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,6 +270,7 @@ mod tests {
                     model: "  gemini-test  ".into(),
                     base_url: Some("   ".into()),
                     program: Some("  ".into()),
+                    subagents: false,
                 }),
                 ..Settings::default()
             })
@@ -274,6 +283,7 @@ mod tests {
         assert_eq!(inference.model, "gemini-test");
         assert_eq!(inference.base_url, None);
         assert_eq!(inference.program, None);
+        assert!(!inference.subagents);
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"safetyMode\": \"delete_safe\""), "{text}");
@@ -281,6 +291,20 @@ mod tests {
             !text.to_lowercase().contains("key"),
             "no key belongs in settings: {text}"
         );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn subagents_are_on_for_settings_saved_before_the_choice_existed() {
+        let path = temp_file("subagents");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{ "inference": { "kind": "github_copilot", "model": "" } }"#,
+        )
+        .unwrap();
+        let inference = SettingsStore::load(path.clone()).get().inference.unwrap();
+        assert!(inference.subagents);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

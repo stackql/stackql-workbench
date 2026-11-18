@@ -73,6 +73,31 @@ These follow from the findings.
 - Declines any `session/request_permission`. With the flags above none is expected, and one would mean the agent is reaching for something outside the engine.
 - Uses an empty folder under the app data directory as the session's working directory.
 
+## Subagents
+
+This was tested on 18 November 2026, on the same versions, to see whether the CLI's subagents can be allowed without giving up the restriction to the engine. Two prompts were sent.
+
+The CLI has a `task` tool that starts a subagent. It is one of the tools the restriction above turns off. Adding `task` to `--available-tools` brings it back and nothing else.
+
+| Question | Finding |
+|---|---|
+| What a subagent can use | The engine's tools and `task`. Asked to run a shell command and to create a file, a subagent had no tool for either. No permission was requested and nothing was written |
+| Which engine a subagent talks to | The same MCP server process as the main agent. One audit file was opened for the session, and `server_info` called from a subagent reported the mode the server was started in |
+| How a start is reported | A `tool_call` whose `rawInput` has `agent_type: "task"`, with `name`, `description` and `prompt`. Its result, when the subagent is done, is the subagent's report |
+| How a subagent's work is reported | Its tool calls and message chunks are ordinary `session/update` messages that carry `_meta["github.com/copilot"].agentId`. The main agent's carry no `_meta` |
+| Naming a subagent | Asking for `subagent.started` at the handshake, under `clientCapabilities._meta["github.com/copilot"].events`, gives a `github.com/copilot/sessionEvent` notification with the `agentId`, a display name, the call that started it and the model |
+| Model | Subagents ran on `gpt-6-luna`, whatever the session's model was. The event says the choice is the agent definition's default |
+| Running together | Two subagents started in one step ran at the same time |
+| Nesting | A subagent can start subagents. One that could not do its job did so, and the CLI stopped it at depth four with `Maximum sub-agent depth of 4 reached` |
+
+What the host does with this:
+
+- Adds `task` to the tool list when subagents are on. That is a setting, on unless the operator turns it off.
+- Tells the agent in the first prompt when to use them: for independent lookups only, never for a change, no more than four at once, and not from inside a subagent.
+- Shows the start of a subagent with its task, and marks each tool call with the subagent that made it.
+- Leaves a subagent's own message text out of the conversation. It arrives whole as the result of the call that started the subagent.
+- Stops a turn that starts more than 12 subagents, and says why.
+
 ## Limits
 
 These are known and accepted for now.
@@ -81,6 +106,8 @@ These are known and accepted for now.
 - The engine's stderr goes to the CLI, not to the host, so the operator is not shown what a provider said when a lookup found nothing. A call that fails is not affected: the engine returns it as a tool error, which the CLI passes on.
 - The CLI keeps its own session history, so Workbench conversations appear there.
 - A different ACP agent needs its own launcher. How the engine's MCP server is handed over, and how tools are restricted, is specific to each agent.
+- What subagents cost was not measured. `--usage-output-file` cannot be combined with `--acp`. The CLI's help says subagents count on usage-based billing, and that on request-based billing a prompt costs one request.
+- The model a subagent runs on cannot be chosen over ACP.
 - ACP support in the Copilot CLI is in public preview.
 
 ## Open questions

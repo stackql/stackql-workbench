@@ -28,6 +28,9 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long the agent gets to wind a turn down after it is told to stop.
 const CANCEL_GRACE: Duration = Duration::from_secs(15);
 const LOG_TAIL_LINES: usize = 12;
+/// A turn that starts more subagents than this is stopped. Each one is a
+/// model of its own at work, and a subagent that is stuck starts more.
+pub const MAX_SUBAGENTS: usize = 12;
 
 /// Sent ahead of the first message of a session. The agent has its own
 /// system prompt, which this app cannot set, so the context goes here.
@@ -43,6 +46,20 @@ editor, or change the safety mode. Nothing else can approve it.\n\
 - You never see credentials and you do not need them. If a provider reports missing \
 credentials, say which provider needs them.";
 
+/// Sent after the primer when the agent may use subagents. Whether to split
+/// work, and how, is the client's to say: the engine cannot start agents.
+const SUBAGENT_PRIMER: &str = "Subagents: when a request needs several independent lookups, for \
+example the same question asked of different providers, services or resources, you may split \
+the work across subagents with the task tool, one for each independent part, started at the \
+same time.\n\
+- Give each subagent all it needs in its prompt: the provider, what to find out, and to answer \
+with the SQL it ran and a short result. It does not see this conversation.\n\
+- Do not use a subagent for one query, or for a join or a union, which is one statement.\n\
+- Do not use a subagent for anything that changes something. Make changes yourself, one at a \
+time.\n\
+- Start no more than four at once, and tell each one not to start subagents of its own.\n\
+- When they are done, put their findings together in one answer.";
+
 /// What differs from one agent to the next, apart from how it is started.
 #[derive(Debug, Clone, Copy)]
 pub struct Profile {
@@ -52,6 +69,12 @@ pub struct Profile {
     pub sign_in_hint: &'static str,
     /// What the agent puts in front of the engine's tool names.
     pub tool_prefix: &'static str,
+    /// The key under which the agent keeps its own additions to protocol
+    /// messages, such as which subagent a tool call belongs to.
+    pub vendor_key: &'static str,
+    /// Events of the agent's own to ask for at the handshake. Empty when
+    /// there are none.
+    pub session_events: &'static [&'static str],
 }
 
 /// A model the agent offers.
@@ -76,6 +99,8 @@ pub struct DelegateSession {
     current_model: Option<String>,
     /// The context block has been sent.
     primed: bool,
+    /// The agent was started with its subagent tool.
+    subagents: bool,
     /// A turn was abandoned mid-way, so the session cannot be used again.
     broken: bool,
 }
@@ -88,6 +113,7 @@ impl DelegateSession {
         profile: Profile,
         cwd: &Path,
         model: Option<&str>,
+        subagents: bool,
     ) -> HostResult<Self> {
         let (client, incoming) = AcpClient::connect(channel);
         let name = profile.name;
@@ -114,14 +140,21 @@ impl DelegateSession {
             ))
         };
 
+        // No file access and no terminal through this app. The agent gets
+        // the engine's tools and nothing from the host.
+        let mut capabilities = json!({
+            "fs": { "readTextFile": false, "writeTextFile": false },
+            "terminal": false
+        });
+        if !profile.session_events.is_empty() {
+            // Ask to be told when a subagent starts, so its tool calls can
+            // be shown as its own and counted.
+            capabilities["_meta"] =
+                json!({ profile.vendor_key: { "events": profile.session_events } });
+        }
         let hello = json!({
             "protocolVersion": PROTOCOL_VERSION,
-            // No file access and no terminal through this app. The agent
-            // gets the engine's tools and nothing from the host.
-            "clientCapabilities": {
-                "fs": { "readTextFile": false, "writeTextFile": false },
-                "terminal": false
-            },
+            "clientCapabilities": capabilities,
             "clientInfo": {
                 "name": "stackql-workbench",
                 "title": "StackQL Workbench",
@@ -199,6 +232,7 @@ impl DelegateSession {
             models,
             current_model,
             primed: false,
+            subagents,
             broken: false,
         })
     }
@@ -232,6 +266,9 @@ impl DelegateSession {
         let mut blocks = Vec::new();
         if !self.primed {
             blocks.push(json!({ "type": "text", "text": PRIMER }));
+            if self.subagents {
+                blocks.push(json!({ "type": "text", "text": SUBAGENT_PRIMER }));
+            }
         }
         blocks.push(json!({ "type": "text", "text": text }));
         self.primed = true;
@@ -259,6 +296,16 @@ impl DelegateSession {
                     Some(item) => {
                         if let Some(reply) = turn.handle(item, emit) {
                             reply.send(&client).await;
+                        }
+                        // The turn went past a limit of this app's. Stop it
+                        // and say why.
+                        if !cancelling && let Some(reason) = turn.abort.take() {
+                            emit(AgentEvent::Notice { message: reason });
+                            cancelling = true;
+                            deadline = Some(tokio::time::Instant::now() + CANCEL_GRACE);
+                            let _ = client
+                                .notify("session/cancel", json!({ "sessionId": self.session_id }))
+                                .await;
                         }
                     }
                     None => incoming_open = false,
@@ -382,6 +429,9 @@ fn parse_models(opened: &Value) -> Vec<ModelOption> {
         .unwrap_or_default()
 }
 
+/// The name a call that starts a subagent is shown under.
+pub const SUBAGENT_TOOL: &str = "subagent";
+
 /// An answer owed to the agent.
 #[derive(Debug, PartialEq)]
 struct Reply {
@@ -412,6 +462,11 @@ struct Turn {
     last_message: Option<String>,
     steps: usize,
     tool_calls: usize,
+    /// The subagents seen this turn, by the agent's id for each, with the
+    /// name shown to the operator.
+    agents: HashMap<String, String>,
+    /// Set when this app has to stop the turn, with the reason.
+    abort: Option<String>,
 }
 
 impl Turn {
@@ -424,7 +479,59 @@ impl Turn {
             last_message: None,
             steps: 0,
             tool_calls: 0,
+            agents: HashMap::new(),
+            abort: None,
         }
+    }
+
+    /// Notes a subagent and returns the name shown for it. More than
+    /// [`MAX_SUBAGENTS`] in one turn stops the turn.
+    fn subagent(&mut self, id: &str, name: Option<&str>) -> String {
+        if let Some(known) = self.agents.get(id) {
+            return known.clone();
+        }
+        let number = self.agents.len() + 1;
+        let label = name
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map_or_else(|| format!("subagent {number}"), |n| truncate(n, 40));
+        self.agents.insert(id.to_string(), label.clone());
+        if self.agents.len() > MAX_SUBAGENTS && self.abort.is_none() {
+            self.abort = Some(format!(
+                "Stopped: {} started more than {MAX_SUBAGENTS} subagents in one turn. Ask for less at once, or turn subagents off in Settings.",
+                self.profile.name
+            ));
+        }
+        label
+    }
+
+    /// The subagent an update belongs to, if it is not the main agent's.
+    fn agent_of(&mut self, update: &Value) -> Option<String> {
+        let id = update
+            .get("_meta")?
+            .get(self.profile.vendor_key)?
+            .get("agentId")?
+            .as_str()?
+            .to_string();
+        Some(self.subagent(&id, None))
+    }
+
+    /// One of the agent's own events. Only the start of a subagent is of
+    /// interest: it gives the subagent's name before its first tool call.
+    fn session_event(&mut self, params: &Value) {
+        if params.get("sessionId").and_then(Value::as_str) != Some(&self.session_id)
+            || params.get("type").and_then(Value::as_str) != Some("subagent.started")
+        {
+            return;
+        }
+        let Some(id) = params.get("agentId").and_then(Value::as_str) else {
+            return;
+        };
+        let name = params
+            .pointer("/data/agentDisplayName")
+            .and_then(Value::as_str);
+        let id = id.to_string();
+        self.subagent(&id, name);
     }
 
     /// Takes one message from the agent. Returns the answer when the
@@ -437,6 +544,8 @@ impl Turn {
                     && let Some(update) = params.get("update")
                 {
                     self.update(update, emit);
+                } else if method.strip_suffix("/sessionEvent") == Some(self.profile.vendor_key) {
+                    self.session_event(&params);
                 }
                 None
             }
@@ -490,6 +599,12 @@ impl Turn {
     fn update(&mut self, update: &Value, emit: &Emit) {
         match update.get("sessionUpdate").and_then(Value::as_str) {
             Some("agent_message_chunk") => {
+                // What a subagent writes is its report to the agent that
+                // started it. It arrives whole as the result of that call,
+                // so the pieces are not shown as the assistant's own words.
+                if self.agent_of(update).is_some() {
+                    return;
+                }
                 let Some(text) = update.pointer("/content/text").and_then(Value::as_str) else {
                     return;
                 };
@@ -527,7 +642,9 @@ impl Turn {
                         .get("title")
                         .and_then(Value::as_str)
                         .unwrap_or("tool");
-                    let arguments = update.get("rawInput").cloned().unwrap_or(Value::Null);
+                    let raw = update.get("rawInput").cloned().unwrap_or(Value::Null);
+                    // Whose call it is: the main agent's, or a subagent's.
+                    let agent = self.agent_of(update);
                     self.tools.insert(
                         id.to_string(),
                         ToolState {
@@ -537,17 +654,33 @@ impl Turn {
                     );
                     self.order.push(id.to_string());
                     self.tool_calls += 1;
+                    // The call that starts a subagent names the kind of
+                    // agent. Show it as a subagent with its task, not as a
+                    // tool with a page of arguments.
+                    let (tool, arguments) = if raw.get("agent_type").is_some() {
+                        let task = raw
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .unwrap_or(title);
+                        (SUBAGENT_TOOL.to_string(), json!({ "task": task }))
+                    } else {
+                        (
+                            title
+                                .strip_prefix(self.profile.tool_prefix)
+                                .unwrap_or(title)
+                                .to_string(),
+                            raw,
+                        )
+                    };
                     emit(AgentEvent::ToolCallStarted {
                         id: id.to_string(),
-                        tool: title
-                            .strip_prefix(self.profile.tool_prefix)
-                            .unwrap_or(title)
-                            .to_string(),
+                        tool,
                         sql: arguments
                             .get("sql")
                             .and_then(Value::as_str)
                             .map(str::to_string),
                         arguments,
+                        agent,
                     });
                 }
                 self.finish_if_done(id, update, emit);
@@ -656,7 +789,15 @@ mod tests {
         name: "Test Agent",
         sign_in_hint: "Run `agent login`.",
         tool_prefix: "stackql-",
+        vendor_key: "example.com/agent",
+        session_events: &["subagent.started"],
     };
+
+    /// An update tagged as a subagent's.
+    fn by(agent: &str, mut update: Value) -> Value {
+        update["_meta"] = json!({ "example.com/agent": { "agentId": agent } });
+        update
+    }
 
     fn collector() -> (Emit, Arc<Mutex<Vec<AgentEvent>>>) {
         let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::default();
@@ -677,13 +818,18 @@ mod tests {
         };
         let mut agent = FakeAgent::over(theirs);
         let opening = tokio::spawn(async move {
-            DelegateSession::open(channel, PROFILE, Path::new("/work"), model).await
+            DelegateSession::open(channel, PROFILE, Path::new("/work"), model, true).await
         });
 
         let (id, params) = agent.expect("initialize").await;
         assert_eq!(params["protocolVersion"], 1);
         assert_eq!(params["clientCapabilities"]["terminal"], false);
         assert_eq!(params["clientCapabilities"]["fs"]["writeTextFile"], false);
+        // The agent's own events are asked for under its own key.
+        assert_eq!(
+            params["clientCapabilities"]["_meta"]["example.com/agent"]["events"],
+            json!(["subagent.started"])
+        );
         agent
             .result(
                 id,
@@ -763,7 +909,7 @@ mod tests {
         };
         let mut agent = FakeAgent::over(agent_side);
         let opening = tokio::spawn(async move {
-            DelegateSession::open(channel, PROFILE, Path::new("/work"), None).await
+            DelegateSession::open(channel, PROFILE, Path::new("/work"), None, false).await
         });
         let (id, _) = agent.expect("initialize").await;
         agent.result(id, json!({ "protocolVersion": 1 })).await;
@@ -790,7 +936,7 @@ mod tests {
         };
         let mut agent = FakeAgent::over(agent_side);
         let opening = tokio::spawn(async move {
-            DelegateSession::open(channel, PROFILE, Path::new("/work"), None).await
+            DelegateSession::open(channel, PROFILE, Path::new("/work"), None, false).await
         });
         let (id, _) = agent.expect("initialize").await;
         agent.result(id, json!({ "protocolVersion": 2 })).await;
@@ -813,16 +959,23 @@ mod tests {
 
         let (prompt_id, params) = agent.expect("session/prompt").await;
         assert_eq!(params["sessionId"], "s1");
-        // The first prompt carries the context, then the operator's words.
+        // The first prompt carries the context, how to use subagents, then
+        // the operator's words.
         let blocks = params["prompt"].as_array().unwrap();
-        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks.len(), 3);
         assert!(
             blocks[0]["text"]
                 .as_str()
                 .unwrap()
                 .contains("StackQL Workbench")
         );
-        assert_eq!(blocks[1]["text"], "how many providers?");
+        assert!(
+            blocks[1]["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("Subagents:")
+        );
+        assert_eq!(blocks[2]["text"], "how many providers?");
 
         // The agent's own line about disabled tools is not news.
         agent
@@ -963,6 +1116,307 @@ mod tests {
         assert_eq!(params["prompt"].as_array().unwrap().len(), 1);
         agent.result(id, json!({ "stopReason": "end_turn" })).await;
         next.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn subagents_are_shown_with_their_task_and_their_calls_are_marked() {
+        let (mut session, mut agent) = opened(None).await;
+        let (emit, events) = collector();
+        let stop = Notify::new();
+        let turn =
+            tokio::spawn(async move { session.prompt("audit two providers", &stop, &emit).await });
+        let (prompt_id, _) = agent.expect("session/prompt").await;
+
+        // The main agent starts a subagent.
+        agent
+            .update(
+                "s1",
+                json!({ "sessionUpdate": "tool_call", "toolCallId": "task1",
+                        "title": "Count github repos", "kind": "other", "status": "pending",
+                        "rawInput": { "name": "github-count", "agent_type": "task",
+                            "description": "Count github repos",
+                            "prompt": "A long prompt the operator does not need to read.",
+                            "mode": "sync" } }),
+            )
+            .await;
+        agent
+            .send(json!({
+                "jsonrpc": "2.0", "method": "example.com/agent/sessionEvent",
+                "params": { "sessionId": "s1", "type": "subagent.started", "agentId": "a1",
+                    "data": { "toolCallId": "task1", "agentDisplayName": "github-count" } }
+            }))
+            .await;
+        // The subagent thinks aloud and runs a query.
+        agent
+            .update(
+                "s1",
+                by(
+                    "a1",
+                    json!({ "sessionUpdate": "agent_message_chunk", "messageId": "sub-m1",
+                        "content": { "type": "text", "text": "Counting now." } }),
+                ),
+            )
+            .await;
+        agent
+            .update(
+                "s1",
+                by(
+                    "a1",
+                    json!({ "sessionUpdate": "tool_call", "toolCallId": "q1",
+                        "title": "stackql-run_select_query", "status": "pending",
+                        "rawInput": { "sql": "SELECT COUNT(*) FROM github.repos.repos" } }),
+                ),
+            )
+            .await;
+        agent
+            .update(
+                "s1",
+                by("a1", json!({ "sessionUpdate": "tool_call_update", "toolCallId": "q1",
+                        "status": "completed",
+                        "rawOutput": { "contents": [{ "type": "text", "text": "| n |\n|---|\n| 90 |" }],
+                            "structuredContent": { "rows": [{ "n": 90 }] } } })),
+            )
+            .await;
+        // Its report comes back as the result of the call that started it.
+        agent
+            .update(
+                "s1",
+                json!({ "sessionUpdate": "tool_call_update", "toolCallId": "task1",
+                        "status": "completed",
+                        "content": [{ "type": "content",
+                            "content": { "type": "text", "text": "github has 90 repos." } }] }),
+            )
+            .await;
+        agent
+            .update(
+                "s1",
+                json!({ "sessionUpdate": "agent_message_chunk", "messageId": "m1",
+                        "content": { "type": "text", "text": "90 repos in github." } }),
+            )
+            .await;
+        agent
+            .result(prompt_id, json!({ "stopReason": "end_turn" }))
+            .await;
+        let summary = turn.await.unwrap().unwrap();
+        assert!(!summary.stopped);
+        assert_eq!(summary.tool_calls, 2);
+
+        let events = events.lock().unwrap().clone();
+        let started: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ToolCallStarted {
+                    id,
+                    tool,
+                    arguments,
+                    agent,
+                    ..
+                } => Some((id.as_str(), tool.as_str(), arguments.clone(), agent.clone())),
+                _ => None,
+            })
+            .collect();
+        // The start of a subagent shows its task and not its whole prompt.
+        assert_eq!(
+            started[0],
+            (
+                "task1",
+                "subagent",
+                json!({ "task": "Count github repos" }),
+                None
+            )
+        );
+        // The subagent's own call is an engine tool, marked with its name.
+        assert_eq!(started[1].0, "q1");
+        assert_eq!(started[1].1, "run_select_query");
+        assert_eq!(started[1].3.as_deref(), Some("github-count"));
+
+        // Only the main agent's words are shown as the reply.
+        let said: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::AssistantDelta { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(said, ["90 repos in github."]);
+
+        // The subagent's report is the result of the call that started it.
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::ToolCallFinished { id, is_error: false, text, .. }
+                if id == "task1" && text == "github has 90 repos."
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::ToolCallFinished { id, table: Some(_), .. } if id == "q1"
+        )));
+    }
+
+    #[tokio::test]
+    async fn a_subagent_with_no_start_event_still_gets_a_name() {
+        let (mut session, mut agent) = opened(None).await;
+        let (emit, events) = collector();
+        let stop = Notify::new();
+        let turn = tokio::spawn(async move { session.prompt("go", &stop, &emit).await });
+        let (prompt_id, _) = agent.expect("session/prompt").await;
+        for (call, who) in [("q1", "a1"), ("q2", "a2"), ("q3", "a1")] {
+            agent
+                .update(
+                    "s1",
+                    by(
+                        who,
+                        json!({ "sessionUpdate": "tool_call", "toolCallId": call,
+                            "title": "stackql-list_providers", "status": "completed",
+                            "rawInput": {} }),
+                    ),
+                )
+                .await;
+        }
+        agent
+            .result(prompt_id, json!({ "stopReason": "end_turn" }))
+            .await;
+        turn.await.unwrap().unwrap();
+
+        let names: Vec<Option<String>> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ToolCallStarted { agent, .. } => Some(agent.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                Some("subagent 1".to_string()),
+                Some("subagent 2".to_string()),
+                Some("subagent 1".to_string())
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn too_many_subagents_stop_the_turn_and_say_why() {
+        let (mut session, mut agent) = opened(None).await;
+        let (emit, events) = collector();
+        let stop = Notify::new();
+        let turn = tokio::spawn(async move { session.prompt("everything", &stop, &emit).await });
+        let (prompt_id, _) = agent.expect("session/prompt").await;
+
+        for n in 0..=MAX_SUBAGENTS {
+            agent
+                .send(json!({
+                    "jsonrpc": "2.0", "method": "example.com/agent/sessionEvent",
+                    "params": { "sessionId": "s1", "type": "subagent.started",
+                        "agentId": format!("a{n}"), "data": { "agentDisplayName": format!("part {n}") } }
+                }))
+                .await;
+        }
+        // One past the limit: this side cancels, once.
+        let message = agent.receive().await;
+        assert_eq!(message["method"], "session/cancel");
+        assert_eq!(message["params"]["sessionId"], "s1");
+        agent
+            .result(prompt_id, json!({ "stopReason": "cancelled" }))
+            .await;
+
+        let summary = turn.await.unwrap().unwrap();
+        assert!(summary.stopped);
+        let notices: Vec<String> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::Notice { message } => Some(message.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert!(notices[0].contains("subagents"), "{}", notices[0]);
+        assert!(notices[0].contains("Settings"), "{}", notices[0]);
+    }
+
+    #[tokio::test]
+    async fn events_for_another_session_or_of_another_kind_are_ignored() {
+        let (mut session, mut agent) = opened(None).await;
+        let (emit, events) = collector();
+        let stop = Notify::new();
+        let turn = tokio::spawn(async move { session.prompt("go", &stop, &emit).await });
+        let (prompt_id, _) = agent.expect("session/prompt").await;
+        for params in [
+            json!({ "sessionId": "other", "type": "subagent.started", "agentId": "x" }),
+            json!({ "sessionId": "s1", "type": "subagent.completed", "agentId": "y" }),
+            json!({ "sessionId": "s1", "type": "subagent.started" }),
+        ] {
+            agent
+                .send(json!({ "jsonrpc": "2.0", "method": "example.com/agent/sessionEvent", "params": params }))
+                .await;
+        }
+        // Some other vendor's event with the same ending is not ours.
+        agent
+            .send(
+                json!({ "jsonrpc": "2.0", "method": "elsewhere.org/sessionEvent",
+                "params": { "sessionId": "s1", "type": "subagent.started", "agentId": "z" } }),
+            )
+            .await;
+        agent
+            .update(
+                "s1",
+                by(
+                    "a1",
+                    json!({ "sessionUpdate": "tool_call", "toolCallId": "q1",
+                        "title": "stackql-server_info", "status": "completed", "rawInput": {} }),
+                ),
+            )
+            .await;
+        agent
+            .result(prompt_id, json!({ "stopReason": "end_turn" }))
+            .await;
+        turn.await.unwrap().unwrap();
+        // None of those counted, so the first subagent seen is number one.
+        let events = events.lock().unwrap().clone();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::ToolCallStarted { agent: Some(name), .. } if name == "subagent 1"
+        )));
+    }
+
+    #[tokio::test]
+    async fn the_subagent_guidance_is_left_out_when_subagents_are_off() {
+        let (client_side, agent_side) = tokio::io::duplex(1 << 16);
+        let (read, write) = tokio::io::split(client_side);
+        let channel = AgentChannel {
+            reader: Box::new(read),
+            writer: Box::new(write),
+            diagnostics: LogBuffer::default(),
+            keepalive: Box::new(()),
+        };
+        let mut agent = FakeAgent::over(agent_side);
+        let opening = tokio::spawn(async move {
+            DelegateSession::open(channel, PROFILE, Path::new("/work"), None, false).await
+        });
+        let (id, _) = agent.expect("initialize").await;
+        agent.result(id, json!({ "protocolVersion": 1 })).await;
+        let (id, _) = agent.expect("session/new").await;
+        agent.result(id, json!({ "sessionId": "s1" })).await;
+        let mut session = opening.await.unwrap().unwrap();
+
+        let (emit, _) = collector();
+        let stop = Notify::new();
+        let turn = tokio::spawn(async move { session.prompt("hello", &stop, &emit).await });
+        let (prompt_id, params) = agent.expect("session/prompt").await;
+        let blocks = params["prompt"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(
+            !blocks
+                .iter()
+                .any(|b| b["text"].as_str().unwrap().contains("Subagents:"))
+        );
+        agent
+            .result(prompt_id, json!({ "stopReason": "end_turn" }))
+            .await;
+        turn.await.unwrap().unwrap();
     }
 
     #[tokio::test]

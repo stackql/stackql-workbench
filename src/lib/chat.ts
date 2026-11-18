@@ -22,6 +22,8 @@ export interface ToolItem {
   key: string;
   callId: string;
   tool: string;
+  /** The subagent that made the call. Null for the main agent. */
+  agent: string | null;
   /** The statement, when the tool takes one. Always shown as SQL. */
   sql: string | null;
   arguments: unknown;
@@ -128,6 +130,7 @@ export function applyAgentEvent(state: ChatState, event: AgentEvent): ChatState 
         key,
         callId: event.data.id,
         tool: event.data.tool,
+        agent: event.data.agent ?? null,
         sql: event.data.sql,
         arguments: event.data.arguments,
         status: 'running',
@@ -161,6 +164,7 @@ export function applyAgentEvent(state: ChatState, event: AgentEvent): ChatState 
           key,
           callId: event.data.request.id,
           tool: event.data.request.tool ?? 'approval',
+          agent: null,
           sql: event.data.request.sql,
           arguments: {},
           status: 'running',
@@ -351,6 +355,9 @@ const TOOL_TITLES: Record<string, string> = {
   reload_credentials: 'Reload credentials',
   query_library_search: 'Search query library',
   query_library_get: 'Get query library entry',
+  // Not an engine tool: a delegated agent handing part of the work to a
+  // subagent.
+  subagent: 'Subagent',
 };
 
 export function toolTitle(tool: string): string {

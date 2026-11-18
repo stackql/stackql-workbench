@@ -37,6 +37,8 @@ export interface InferenceSettings {
   baseUrl: string | null;
   /** For a delegated agent: where its program is. Null searches PATH. */
   program: string | null;
+  /** For a delegated agent: whether it may split work across subagents. */
+  subagents: boolean;
 }
 
 export interface Settings {
@@ -225,7 +227,14 @@ export type AgentEvent =
   | { event: 'assistantDelta'; data: { id: string; text: string } }
   | {
       event: 'toolCallStarted';
-      data: { id: string; tool: string; arguments: unknown; sql: string | null };
+      data: {
+        id: string;
+        tool: string;
+        arguments: unknown;
+        sql: string | null;
+        /** The subagent that made the call. Absent for the main agent. */
+        agent?: string;
+      };
     }
   | { event: 'approvalRequested'; data: { request: ApprovalRequest } }
   | {

@@ -437,6 +437,44 @@ describe('a delegated agent', () => {
   });
 });
 
+describe('subagents', () => {
+  it('marks a call with the subagent that made it', () => {
+    const state = play([
+      {
+        event: 'toolCallStarted',
+        data: { id: 't1', tool: 'subagent', arguments: { task: 'Count github repos' }, sql: null },
+      },
+      {
+        event: 'toolCallStarted',
+        data: {
+          id: 'q1',
+          tool: 'run_select_query',
+          arguments: { sql: 'SELECT 1' },
+          sql: 'SELECT 1',
+          agent: 'github-count',
+        },
+      },
+    ]);
+    const [task, query] = tools(state);
+    expect(task).toMatchObject({ tool: 'subagent', agent: null });
+    expect(query).toMatchObject({ tool: 'run_select_query', agent: 'github-count' });
+    expect(toolTitle('subagent')).toBe('Subagent');
+    expect(argumentSummary(task?.arguments)).toBe('task: Count github repos');
+  });
+
+  it('finishes a subagent and its calls each by their own id', () => {
+    const state = play([
+      started('t1', 'subagent', null),
+      { ...started('q1', 'run_select_query', 'SELECT 1') },
+      finished('q1'),
+      finished('t1', false, 'github has 90 repos.'),
+    ]);
+    const [task, query] = tools(state);
+    expect(query?.status).toBe('done');
+    expect(task).toMatchObject({ status: 'done', text: 'github has 90 repos.' });
+  });
+});
+
 describe('chatTitle', () => {
   it('is null before the first message', () => {
     expect(chatTitle(emptyChat)).toBeNull();

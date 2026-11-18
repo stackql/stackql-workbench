@@ -426,6 +426,7 @@ fn delegate_request(inference: &InferenceSettings) -> DelegateRequest {
     DelegateRequest {
         model: Some(inference.model.trim().to_string()).filter(|model| !model.is_empty()),
         program: inference.program.as_deref().map(std::path::PathBuf::from),
+        subagents: inference.subagents,
     }
 }
 
@@ -443,6 +444,8 @@ pub async fn agent_delegate_info(
             .map(|p| p.trim().trim_matches('"').to_string())
             .filter(|p| !p.is_empty())
             .map(std::path::PathBuf::from),
+        // Nothing is asked of the agent here, so it needs no subagents.
+        subagents: false,
     };
     state
         .agent

@@ -41,6 +41,7 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
   const [model, setModel] = useState(config.inference?.model ?? '');
   const [baseUrl, setBaseUrl] = useState(config.inference?.baseUrl ?? '');
   const [program, setProgram] = useState(config.inference?.program ?? '');
+  const [subagents, setSubagents] = useState(config.inference?.subagents ?? true);
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +93,7 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
           model: model.trim(),
           baseUrl: delegated ? null : baseUrl.trim() || null,
           program: delegated ? program.trim() || null : null,
+          subagents,
         },
         delegated ? null : apiKey.trim() || null,
       ),
@@ -256,6 +258,27 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
                   models.
                 </p>
               )}
+
+              <label className="mt-3 flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={subagents}
+                  onChange={(event) => {
+                    setSubagents(event.target.checked);
+                  }}
+                />
+                <span>
+                  <span className="font-semibold">Split independent lookups across subagents</span>
+                  <span className="block text-ink-muted">
+                    For a request that spans several providers, services or resources, the agent may
+                    hand each part to a subagent and run them at the same time. A subagent gets the
+                    engine tools and nothing else, on the same engine and safety mode. The CLI
+                    chooses the model a subagent runs on, which can differ from the one above, and a
+                    turn that starts more than 12 is stopped.
+                  </span>
+                </span>
+              </label>
             </>
           ) : (
             <>

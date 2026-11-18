@@ -110,6 +110,9 @@ pub enum AgentEvent {
         arguments: Value,
         /// The statement, when the tool takes one. Shown as SQL.
         sql: Option<String>,
+        /// The subagent that made the call, when it was not the main agent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        agent: Option<String>,
     },
     /// The engine wants the operator's approval before it runs something.
     ApprovalRequested {
@@ -150,6 +153,8 @@ pub struct DelegateRequest {
     pub model: Option<String>,
     /// Where the agent's program is. `None` searches `PATH`.
     pub program: Option<PathBuf>,
+    /// Whether the agent may split work across subagents.
+    pub subagents: bool,
 }
 
 /// What a delegated agent says about itself.
@@ -289,6 +294,7 @@ impl AgentRuntime {
         // One file per safety mode, so two instances of the app in different
         // modes cannot hand each other's mode to an agent that is starting.
         let config_file = dir.join(format!("mcp-config-{}.json", mode.as_str()));
+        let subagents = request.subagents;
         let cwd = workspace.clone();
         let build: DelegateBuilder<'_> = Box::new(move |server: McpServerCommand| {
             let config = copilot::mcp_config(&server).map_err(HostError::Agent)?;
@@ -303,7 +309,7 @@ impl AgentRuntime {
             })?;
             Ok(DelegateCommand {
                 program,
-                args: copilot::launch_args(&config_file, &tool_ids),
+                args: copilot::launch_args(&config_file, &tool_ids, subagents),
                 cwd,
             })
         });
@@ -313,6 +319,7 @@ impl AgentRuntime {
             copilot::PROFILE,
             &workspace,
             request.model.as_deref(),
+            request.subagents,
         )
         .await?;
         Ok((session, tools.len()))
@@ -570,6 +577,7 @@ impl AgentRuntime {
             tool: call.name.clone(),
             arguments: Value::Object(call.arguments.clone()),
             sql,
+            agent: None,
         });
 
         let started = Instant::now();
@@ -1003,6 +1011,7 @@ mod tests {
             tool: "run_select_query".into(),
             arguments: json!({ "sql": "SELECT 1" }),
             sql: Some("SELECT 1".into()),
+            agent: None,
         };
         assert_eq!(
             serde_json::to_value(&event).unwrap(),

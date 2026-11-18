@@ -252,6 +252,7 @@ mod tests {
             model: model.to_string(),
             base_url: base_url.map(str::to_string),
             program: None,
+            subagents: true,
         }
     }
 

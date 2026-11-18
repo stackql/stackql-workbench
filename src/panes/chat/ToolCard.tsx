@@ -38,6 +38,14 @@ export function ToolCard({ item, onOpenInEditor, onShowTable, onAnswer }: ToolCa
           )}
         </span>
         <span className="font-semibold">{toolTitle(item.tool)}</span>
+        {item.agent !== null && (
+          <span
+            className="shrink-0 rounded-full border border-line px-1.5 text-[11px] text-ink-muted"
+            title={`Run by the subagent ${item.agent}`}
+          >
+            {item.agent}
+          </span>
+        )}
         {args !== '' && <span className="selectable min-w-0 truncate text-ink-muted">{args}</span>}
         <span className="flex-1" />
         {item.elapsedMs !== null && (
