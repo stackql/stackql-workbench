@@ -7,6 +7,7 @@ export type CommandId =
   | 'showChat'
   | 'showExplorer'
   | 'showActivity'
+  | 'showLibrary'
   | 'toggleSidebar'
   | 'openSettings'
   | 'openModelSettings'
@@ -106,6 +107,7 @@ export const MENUS: Menu[] = [
       command('showChat', 'Chat', { key: '1' }),
       command('showExplorer', 'Explorer', { key: '2' }),
       command('showActivity', 'Activity', { key: '3' }),
+      command('showLibrary', 'Library', { key: '4' }),
       separator,
       command('goToResource', 'Go to Resource...', { key: 'p' }),
       command('refreshExplorer', 'Refresh Explorer'),

@@ -15,6 +15,7 @@ Pre-alpha. This much has landed on Windows.
 - The first delegated agent, an M5 item: the GitHub Copilot CLI, driven over the Agent Client Protocol. It uses the sign-in the CLI already has.
 - A chat-first layout: chat is the view the app opens in, with a side menu for the explorer and activity, and File, Edit, View, Query, Providers and Help menus.
 - Most of M1, the query IDE: editor tabs, completion from provider metadata, the JSON cell viewer, statement history, export as CSV and JSON, and a `stackql exec` command for a statement.
+- A query library view: the entries of the published query library, for the operator, with no chat backend needed.
 
 Not started: the rest of M1 (saved `.iql` files, cancel, a streaming grid), M2 (packaging), plan sign-in and any delegated agent other than the Copilot CLI. Replies from the API key backends are not streamed yet. Replies from the Copilot CLI are.
 
@@ -90,9 +91,9 @@ The layout is below. Keep it current as the code lands.
 stackql-workbench/
   src/                  webview (React)
     host/               typed wrappers over IPC, the only Tauri imports
-    lib/                pure logic with tests: results, cells, export formats, explorer tree, statement templates, completion, tabs, history, the CLI command, chat, activity, menu, markdown
+    lib/                pure logic with tests: results, cells, export formats, explorer tree, statement templates, completion, tabs, history, the CLI command, chat, activity, the query library, menu, theme, markdown
     state/              hooks that connect the host to the panes
-    panes/              shell (menu bar, side menu), chat, explorer, editor, results, activity, settings, statusbar
+    panes/              shell (menu bar, side menu), chat, explorer, editor, results, library, activity, settings, statusbar
     ui/                 small shared components
   src-tauri/            host (Rust)
     src/
@@ -103,6 +104,7 @@ stackql-workbench/
       secrets/          keychain access
       activity/         operator history, engine audit log reader
       icons/            provider icon lookup, fetch and cache
+      library/          the query library's index and documents, fetch and cache
       config/           settings
       ipc/              command and event definitions, saving an export, the app's own links
     examples/           pgwire_spike and mcp_spike, the probes behind the spike reports
@@ -335,8 +337,13 @@ A few fixed points for the interface.
 - The status bar is neutral. A coloured dot carries the engine's state.
 - The app icon is StackQL's own favicon. The files in `src-tauri/icons/` were generated with `npx tauri icon` from `static/android-chrome-512x512.png` in the `stackql/stackql.io` repository, which is the same mark as its `favicon.ico` at a usable resolution.
 - Provider nodes in the explorer show the provider's own icon. The host resolves it through the provider dictionary published at `src/configs/providers.json` in `stackql/stackql.io`, fetches the icon from `stackql.io`, caches it in the app cache directory and passes it to the webview as a `data:` URL. A provider with no entry, or whose icon cannot be fetched, shows the letter badge. Providers built into the engine, such as `stackql_preview`, show the StackQL icon, which is compiled in. The webview itself still makes no network calls. A snapshot of the dictionary is compiled in as a fallback.
+- The Library view lists the query library for the operator. The host reads it from the `stackql/query-library.stackql.io` repository on `raw.githubusercontent.com`: the index at `static/docs/query-library/index.json`, and one markdown document for each entry under `query-library/queries`. Both are kept in the app cache directory, and an older copy is shown, and marked, when the library cannot be reached. The webview still makes no network calls. The MCP library tools are the agent's and are not used here.
+- An entry's id is checked before it is put in an address. A document's front matter is taken off, not parsed, and the rest is drawn by the same markdown reader as a reply. The entry's statement is the first SQL block under its Query heading.
+- A library statement is a template, with `{{name}}` where a value goes. It opens in a new tab under a comment that names the entry and what to fill in. The app fills nothing in and runs nothing.
+- Entries are grouped by use case, which is the first of the entry's own tags that names one. By default only entries whose providers are all installed are listed.
+- Under an empty conversation one suggestion asks about metadata and the others come from library entries that can run here: stable, not a mutation, and for installed providers. With none, the earlier fixed suggestions are shown.
 - Saved queries are plain `.iql` files on disk, not an app database.
-- Layout: a menu bar with File, Edit, View, Query, Providers and Help, a side menu, one main view at a time, and the status bar. The views are chat, the explorer with the editor and results, and activity. Settings is a dialog. Chat is the view the app opens in.
+- Layout: a menu bar with File, Edit, View, Query, Providers and Help, a side menu, one main view at a time, and the status bar. The views are chat, the explorer with the editor and results, the query library, and activity. Settings is a dialog. Chat is the view the app opens in.
 - The menus are drawn in the webview, not by the OS, so they are the same on both platforms and can be tested like the rest of the page. They repeat what the side menu and the panes offer.
 - Every view stays mounted while another is shown, so the editor keeps its text and history and a running turn keeps its place.
 - Row results from the assistant are shown in the conversation, first rows only, with a way to open the full result in the grid.

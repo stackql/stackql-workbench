@@ -90,6 +90,7 @@ describe('commandForKey', () => {
     expect(commandForKey(press('1', { ctrlKey: true }), false)).toBe('showChat');
     expect(commandForKey(press('2', { ctrlKey: true }), false)).toBe('showExplorer');
     expect(commandForKey(press('3', { ctrlKey: true }), false)).toBe('showActivity');
+    expect(commandForKey(press('4', { ctrlKey: true }), false)).toBe('showLibrary');
     expect(commandForKey(press('b', { ctrlKey: true }), false)).toBe('toggleSidebar');
     expect(commandForKey(press('t', { ctrlKey: true }), false)).toBe('newTab');
     expect(commandForKey(press('p', { ctrlKey: true }), false)).toBe('goToResource');

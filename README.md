@@ -11,6 +11,7 @@ StackQL Workbench is a native desktop app that runs against the `stackql` engine
 The planned capabilities are listed below.
 
 - Provider explorer: a lazy tree of providers, services, resources, methods and fields
+- Query library: the published library of working statements, grouped by use case, to open in the editor
 - Query editor: tabs, StackQL-aware completion, saved `.iql` files
 - Results grid: virtualised rows, JSON cell viewer, export
 - Chat: the view the app opens in. It needs a model backend, and asks for one the first time a message is sent
@@ -203,7 +204,7 @@ The engine keeps its provider cache in a folder of the app's own: `.stackql` bes
 
 Provider credentials are environment variables the engine reads. On Windows the engine sees the variables of your user account. To use a dotenv file, set it under Settings.
 
-The app opens in chat. The side menu leads to the explorer, which holds the provider tree, the query editor and the results grid, and to the activity list. The File, Edit, View, Query, Providers and Help menus repeat those.
+The app opens in chat. The side menu leads to the explorer, which holds the provider tree, the query editor and the results grid, to the query library, and to the activity list. The File, Edit, View, Query, Providers and Help menus repeat those.
 
 Chat needs a model backend. The first time you send a message without one, the model backend settings open. There are two kinds.
 
@@ -224,7 +225,7 @@ stackql-workbench/
     host/               typed wrappers over IPC
     lib/                pure logic with tests
     state/              hooks that connect the host to the panes
-    panes/              shell, chat, explorer, editor, results, activity, settings, statusbar
+    panes/              shell, chat, explorer, editor, results, library, activity, settings, statusbar
     ui/                 small shared components
   src-tauri/            host (Rust)
     src/
@@ -235,6 +236,7 @@ stackql-workbench/
       secrets/          keychain access
       activity/         operator history and the engine audit log
       icons/            provider icons
+      library/          the query library
       config/           settings
       ipc/              command and event definitions
     examples/           the probes behind the spike reports

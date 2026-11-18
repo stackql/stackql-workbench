@@ -11,6 +11,7 @@ pub mod engine;
 pub mod error;
 pub mod icons;
 pub mod ipc;
+pub mod library;
 pub mod query;
 pub mod secrets;
 pub mod util;
@@ -27,6 +28,7 @@ use crate::connection::local::LocalConnection;
 use crate::engine::approot::Defaults as ApprootDefaults;
 use crate::icons::ProviderIcons;
 use crate::ipc::AppState;
+use crate::library::Library;
 use crate::secrets::{KeychainStore, MemoryStore, SecretStore};
 
 fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -83,6 +85,7 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         connection,
         settings,
         icons: Arc::new(ProviderIcons::new(cache_dir.join("provider-icons"))),
+        library: Arc::new(Library::new(cache_dir.join("query-library"))),
         secrets,
         keychain_available,
         history: Arc::new(History::new(data_dir.join("history.jsonl"))),
@@ -126,6 +129,8 @@ pub fn run() {
             ipc::activity_list,
             ipc::save::save_text_file,
             ipc::links::open_link,
+            ipc::library_index,
+            ipc::library_document,
         ])
         .build(tauri::generate_context!());
 

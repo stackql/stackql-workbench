@@ -4,6 +4,7 @@ import { copyText } from './host/clipboard';
 import { chatTitle, type ToolItem } from './lib/chat';
 import { execCommand } from './lib/cli';
 import { EMPTY_CATALOG, sampleStatement, type Catalog } from './lib/completion';
+import { chatSuggestions } from './lib/library';
 import { commandForKey, type CommandId } from './lib/menu';
 import { agentRun, type RunState } from './lib/results';
 import { ActivityPane } from './panes/activity/ActivityPane';
@@ -12,6 +13,7 @@ import { Editor } from './panes/editor/Editor';
 import { HistoryList } from './panes/editor/HistoryList';
 import { TabStrip } from './panes/editor/TabStrip';
 import { Explorer, type ExplorerHandle } from './panes/explorer/Explorer';
+import { LibraryPane } from './panes/library/LibraryPane';
 import { Results } from './panes/results/Results';
 import { ChatSettings } from './panes/settings/ChatSettings';
 import { SettingsDialog } from './panes/settings/SettingsDialog';
@@ -22,6 +24,7 @@ import { EngineBanner } from './panes/statusbar/EngineBanner';
 import { StatusBar } from './panes/statusbar/StatusBar';
 import { useAgent, type AgentResult } from './state/useAgent';
 import { useEngineStatus } from './state/useEngineStatus';
+import { useLibrary } from './state/useLibrary';
 import { useQueryRun } from './state/useQueryRun';
 import { useTabs } from './state/useTabs';
 import { useTheme } from './state/useTheme';
@@ -88,6 +91,7 @@ export function App() {
   const query = useQueryRun();
   const tabs = useTabs(WELCOME_TEXT);
   const { choice: themeChoice, setChoice: setThemeChoice } = useTheme();
+  const library = useLibrary();
 
   // Chat is where the app opens. The explorer and activity are a click away.
   const [view, setView] = useState<View>('chat');
@@ -186,6 +190,11 @@ export function App() {
     );
   }, []);
   const sample = useMemo(() => sampleStatement(providers), [providers]);
+  // One question about metadata, and the rest from library entries that can run here.
+  const suggestions = useMemo(
+    () => chatSuggestions(library.index?.entries ?? [], new Set(providers)),
+    [library.index, providers],
+  );
 
   // A stackql exec command for what Run would run, for the operator's shell.
   const copyAsCli = useCallback(() => {
@@ -274,6 +283,9 @@ export function App() {
           break;
         case 'showActivity':
           setView('activity');
+          break;
+        case 'showLibrary':
+          setView('library');
           break;
         case 'toggleSidebar':
           setNavCollapsed((collapsed) => !collapsed);
@@ -445,6 +457,7 @@ export function App() {
               onOpenModelSettings={() => {
                 setSettings('model');
               }}
+              suggestions={suggestions}
             />
           </div>
 
@@ -582,6 +595,21 @@ export function App() {
                 <Results run={agentResult ?? query.state} onStopWaiting={stopWaiting} />
               </div>
             </div>
+          </div>
+
+          <div className={view === 'library' ? 'h-full' : 'hidden'} data-view="library">
+            <LibraryPane
+              library={library}
+              installed={providers}
+              onOpenStatement={(sql) => {
+                setView('explorer');
+                openTab(sql);
+              }}
+              onAddProvider={() => {
+                setView('explorer');
+                explorer.current?.addProvider();
+              }}
+            />
           </div>
 
           <div className={view === 'activity' ? 'h-full' : 'hidden'} data-view="activity">

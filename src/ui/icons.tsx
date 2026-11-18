@@ -215,6 +215,13 @@ export const GoTo = (p: IconProps) => (
   </Svg>
 );
 
+export const Book = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 3.25A1.25 1.25 0 0 1 4.25 2H13v9.5H4.25A1.25 1.25 0 0 0 3 12.75z" />
+    <path d="M3 12.75A1.25 1.25 0 0 0 4.25 14H13v-2.5M6 5h4.5" />
+  </Svg>
+);
+
 export const Download = (p: IconProps) => (
   <Svg {...p}>
     <path d="M8 2.5v7.5M4.75 7 8 10.25 11.25 7M3 13.25h10" />

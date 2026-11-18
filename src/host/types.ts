@@ -94,6 +94,40 @@ export interface RunSummary {
   elapsedMs: number;
 }
 
+/** One entry of the query library, as its index describes it. */
+export interface LibraryEntry {
+  /** For example github/repos/org-repos-list. */
+  id: string;
+  title: string;
+  description: string;
+  providers: string[];
+  services: string[];
+  tags: string[];
+  keywords: string[];
+  intentKeywords: string[];
+  /** The library's own word on whether the statement changes anything. */
+  mutation: boolean;
+  verb: string;
+  /** For example stable or draft. */
+  status: string;
+  requiredParams: string[];
+}
+
+export interface LibraryIndex {
+  entries: LibraryEntry[];
+  buildId: string;
+  /** The library could not be reached. This is the copy kept from an earlier time. */
+  fromCache: boolean;
+}
+
+export interface LibraryDocument {
+  id: string;
+  /** The entry's document, without its front matter. */
+  markdown: string;
+  /** The entry's statement, a template with {{name}} where a value goes. */
+  statement: string | null;
+}
+
 /** One of the app's own links. The host holds the address. */
 export type AppLink = 'docs' | 'queryLibrary' | 'issues';
 

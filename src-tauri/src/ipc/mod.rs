@@ -23,6 +23,7 @@ use crate::config::{InferenceSettings, Settings, SettingsStore};
 use crate::connection::{Connection, EngineStatus, EventSink, SafetyMode};
 use crate::error::{HostError, HostResult};
 use crate::icons::{ProviderIcon, ProviderIcons};
+use crate::library::{Library, LibraryDocument, LibraryIndex};
 use crate::query::explorer::{self, Field, Method, MethodField, Provider, Resource, Service};
 use crate::query::result::{QueryEvent, RunSummary};
 use crate::secrets::SecretStore;
@@ -35,6 +36,7 @@ pub struct AppState {
     pub connection: Arc<dyn Connection>,
     pub settings: Arc<SettingsStore>,
     pub icons: Arc<ProviderIcons>,
+    pub library: Arc<Library>,
     pub agent: Arc<AgentRuntime>,
     pub secrets: Arc<dyn SecretStore>,
     /// False when the OS keychain could not be opened and keys are held in
@@ -203,6 +205,25 @@ pub async fn provider_icons(
     providers: Vec<String>,
 ) -> HostResult<HashMap<String, ProviderIcon>> {
     Ok(state.icons.icons(&providers).await)
+}
+
+/// The query library's index. The host fetches it, and keeps a copy for
+/// when the library cannot be reached.
+#[tauri::command]
+pub async fn library_index(
+    state: State<'_, AppState>,
+    refresh: Option<bool>,
+) -> HostResult<LibraryIndex> {
+    state.library.index(refresh.unwrap_or(false)).await
+}
+
+/// One entry of the query library: its text and its statement.
+#[tauri::command]
+pub async fn library_document(
+    state: State<'_, AppState>,
+    id: String,
+) -> HostResult<LibraryDocument> {
+    state.library.document(&id).await
 }
 
 #[tauri::command]

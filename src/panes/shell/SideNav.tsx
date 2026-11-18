@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
-import { Gear, History, NewChat, Sidebar, Spinner, Tree } from '../../ui/icons';
+import { Book, Gear, History, NewChat, Sidebar, Spinner, Tree } from '../../ui/icons';
 import { Wordmark } from '../../ui/Wordmark';
 
 /** The main views. One is shown at a time. */
-export type View = 'chat' | 'explorer' | 'activity';
+export type View = 'chat' | 'explorer' | 'library' | 'activity';
 
 interface SideNavProps {
   view: View;
@@ -62,6 +62,16 @@ export function SideNav({
           active={view === 'explorer'}
           onClick={() => {
             onView('explorer');
+          }}
+        />
+        <Item
+          icon={<Book />}
+          label="Library"
+          title="Statements from the query library, ready to open in the editor"
+          collapsed={collapsed}
+          active={view === 'library'}
+          onClick={() => {
+            onView('library');
           }}
         />
         <Item

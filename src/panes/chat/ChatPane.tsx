@@ -4,27 +4,15 @@ import {
   SAFETY_MODES,
   chatProgress,
   chatTitle,
-  looksLikeSql,
   modeDescription,
   pendingApprovals,
-  splitFences,
   type ChatItem,
   type ChatState,
   type ToolItem,
 } from '../../lib/chat';
 import { IconButton } from '../../ui/IconButton';
-import {
-  ArrowUp,
-  Bot,
-  ErrorMark,
-  NewChat,
-  OpenInEditor,
-  Shield,
-  Spinner,
-  Stop,
-  Warning,
-} from '../../ui/icons';
-import { Markdown } from './Markdown';
+import { ArrowUp, Bot, ErrorMark, NewChat, Shield, Spinner, Stop, Warning } from '../../ui/icons';
+import { AssistantText } from './AssistantText';
 import { SessionChips } from './SessionChips';
 import { ToolCard } from './ToolCard';
 
@@ -34,13 +22,6 @@ const BACKEND_LABEL: Record<string, string> = {
   openai_compatible: 'OpenAI-compatible',
   github_copilot: 'GitHub Copilot',
 };
-
-/** Things to ask that need no credentials, to get a first conversation going. */
-const SUGGESTIONS = [
-  'Which providers are installed?',
-  'What providers can I install from the registry?',
-  'What can I query in the github provider?',
-];
 
 interface ChatPaneProps {
   /** Null until the configuration has been read. */
@@ -56,6 +37,8 @@ interface ChatPaneProps {
   onOpenInEditor: (sql: string) => void;
   onShowTable: (item: ToolItem) => void;
   onOpenModelSettings: () => void;
+  /** Things to ask, shown under an empty conversation. */
+  suggestions: string[];
 }
 
 /** The conversation with the assistant. This is the app's main view. */
@@ -71,6 +54,7 @@ export function ChatPane({
   onOpenInEditor,
   onShowTable,
   onOpenModelSettings,
+  suggestions,
 }: ChatPaneProps) {
   const [draft, setDraft] = useState('');
   const end = useRef<HTMLDivElement>(null);
@@ -120,7 +104,7 @@ export function ChatPane({
           </p>
           {composer}
           <div className="mt-3 flex flex-wrap gap-2">
-            {SUGGESTIONS.map((suggestion) => (
+            {suggestions.map((suggestion) => (
               <button
                 key={suggestion}
                 type="button"
@@ -379,41 +363,4 @@ function Item({ item, backend, onOpenInEditor, onShowTable, onAnswer }: ItemProp
         </div>
       );
   }
-}
-
-/** Assistant text, with fenced code shown as code and SQL offered to the editor. */
-function AssistantText({
-  text,
-  onOpenInEditor,
-}: {
-  text: string;
-  onOpenInEditor: (sql: string) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      {splitFences(text).map((segment, index) =>
-        segment.kind === 'text' ? (
-          <Markdown key={index} text={segment.text} />
-        ) : (
-          <div key={index} className="relative rounded-lg border border-line bg-surface">
-            <pre className="selectable m-0 max-h-60 overflow-auto py-2 pr-8 pl-3 font-mono text-[12px] break-words whitespace-pre-wrap">
-              {segment.code}
-            </pre>
-            {looksLikeSql(segment) && (
-              <div className="absolute top-0.5 right-0.5">
-                <IconButton
-                  label="Open in editor"
-                  onClick={() => {
-                    onOpenInEditor(segment.code);
-                  }}
-                >
-                  <OpenInEditor />
-                </IconButton>
-              </div>
-            )}
-          </div>
-        ),
-      )}
-    </div>
-  );
 }

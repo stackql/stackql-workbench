@@ -16,6 +16,8 @@ import type {
   Field,
   HostError,
   InferenceSettings,
+  LibraryDocument,
+  LibraryIndex,
   Method,
   MethodField,
   Provider,
@@ -139,6 +141,13 @@ export const host = {
    */
   saveTextFile: (suggestedName: string, kind: 'csv' | 'json' | 'jsonl', contents: string) =>
     invoke<string | null>('save_text_file', { suggestedName, kind, contents }),
+
+  library: {
+    /** The query library's index. `refresh` asks for a new copy. */
+    index: (refresh: boolean) => invoke<LibraryIndex>('library_index', { refresh }),
+    /** One entry's document and statement. */
+    document: (id: string) => invoke<LibraryDocument>('library_document', { id }),
+  },
 
   /** Opens one of the app's own links in the operator's browser. */
   openLink: (link: AppLink) => invoke('open_link', { link }),
