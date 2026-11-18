@@ -287,7 +287,9 @@ impl AgentRuntime {
         probe.close().await;
         let tool_ids = copilot::tool_ids(&tools);
 
-        let config_file = dir.join("mcp-config.json");
+        // One file per safety mode, so two instances of the app in different
+        // modes cannot hand each other's mode to an agent that is starting.
+        let config_file = dir.join(format!("mcp-config-{}.json", mode.as_str()));
         let cwd = workspace.clone();
         let build: DelegateBuilder<'_> = Box::new(move |server: McpServerCommand| {
             let config = copilot::mcp_config(&server).map_err(HostError::Agent)?;
