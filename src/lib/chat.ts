@@ -379,22 +379,22 @@ export const SAFETY_MODES: { mode: SafetyMode; label: string; description: strin
   {
     mode: 'read_only',
     label: 'Read only',
-    description: 'Queries only. Every change is refused.',
+    description: 'Queries run. Changes are refused by the engine.',
   },
   {
     mode: 'safe',
     label: 'Safe',
-    description: 'Queries run. Every change asks you first.',
+    description: 'Queries run. Each change needs your approval before it runs.',
   },
   {
     mode: 'delete_safe',
     label: 'Delete safe',
-    description: 'Inserts and updates run. Deletes and lifecycle operations ask you first.',
+    description: 'Queries and changes run. DELETE and EXEC need your approval.',
   },
   {
     mode: 'full_access',
     label: 'Full access',
-    description: 'Everything runs without asking.',
+    description: 'Everything runs without approval.',
   },
 ];
 
@@ -403,11 +403,11 @@ export const SAFETY_MODES: { mode: SafetyMode; label: string; description: strin
  * engine's approval prompt on, so the engine refuses where it would ask.
  */
 const DELEGATED_DESCRIPTIONS: Record<SafetyMode, string> = {
-  read_only: 'Queries only. Every change is refused.',
-  safe: 'Queries run. Every change is refused, because this agent cannot show the approval prompt.',
+  read_only: 'Queries run. Changes are refused by the engine.',
+  safe: 'Queries run. Changes are refused by the engine, because this backend cannot show the approval prompt.',
   delete_safe:
-    'Inserts and updates run. Deletes and lifecycle operations are refused, because this agent cannot show the approval prompt.',
-  full_access: 'Everything runs without asking.',
+    'Queries and changes run. DELETE and EXEC are refused by the engine, because this backend cannot show the approval prompt.',
+  full_access: 'Everything runs without approval.',
 };
 
 /** What a safety mode means for the backend in use. */

@@ -427,9 +427,19 @@ describe('a delegated agent', () => {
   });
 
   it('says changes are refused where another backend would ask', () => {
-    expect(modeDescription('safe', false)).toContain('asks you first');
+    expect(modeDescription('safe', false)).toBe(
+      'Queries run. Each change needs your approval before it runs.',
+    );
+    expect(modeDescription('delete_safe', false)).toBe(
+      'Queries and changes run. DELETE and EXEC need your approval.',
+    );
+    // An API key backend can show the prompt, so nothing says it cannot.
+    for (const mode of ['read_only', 'safe', 'delete_safe', 'full_access'] as const) {
+      expect(modeDescription(mode, false)).not.toContain('cannot');
+    }
+    // A delegated agent cannot, so a change is refused and the text says so.
     expect(modeDescription('safe', true)).toContain('refused');
-    expect(modeDescription('safe', true)).not.toContain('asks');
+    expect(modeDescription('safe', true)).not.toContain('needs your approval');
     expect(modeDescription('delete_safe', true)).toContain('refused');
     // Where nothing needs approval the two read the same.
     expect(modeDescription('read_only', true)).toBe(modeDescription('read_only', false));

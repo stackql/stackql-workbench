@@ -227,11 +227,7 @@ function Composer({
           aria-label="Message"
           rows={2}
           className="selectable block min-h-[56px] w-full resize-none rounded-2xl bg-transparent px-4 pt-3 pb-1 outline-none"
-          placeholder={
-            engineRunning
-              ? 'Ask the assistant. Enter sends, Shift+Enter adds a line.'
-              : 'The engine is not running.'
-          }
+          placeholder={engineRunning ? 'Ask about your providers' : 'The engine is not running.'}
           value={draft}
           disabled={!engineRunning}
           onChange={(event) => {
@@ -306,13 +302,12 @@ function Composer({
           )}
         </div>
       </div>
-      <p className="mt-1.5 px-2 text-[12px] text-ink-muted">
-        {SAFETY_MODES.find((entry) => entry.mode === mode)?.label} mode:{' '}
-        {modeDescription(mode, delegated)}{' '}
-        {delegated
-          ? 'The engine decides what is refused.'
-          : 'The engine decides what needs your approval.'}
-      </p>
+      <div className="mt-1.5 flex items-start gap-3 px-2 text-[12px] text-ink-muted">
+        <span className="min-w-0 flex-1" data-testid="mode-helper">
+          {modeDescription(mode, delegated)}
+        </span>
+        <span className="shrink-0">Enter to send, Shift+Enter for a new line</span>
+      </div>
     </div>
   );
 }
