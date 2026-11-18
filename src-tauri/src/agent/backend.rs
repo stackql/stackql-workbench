@@ -17,6 +17,10 @@ pub struct ToolSpec {
     pub description: String,
     /// JSON Schema for the arguments.
     pub input_schema: Value,
+    /// Whether the tool can make a destructive change, in the server's own
+    /// words: its `destructiveHint`. `None` when the server does not say.
+    /// The host does not work this out for itself.
+    pub destructive: Option<bool>,
 }
 
 /// A tool call the model asked for.

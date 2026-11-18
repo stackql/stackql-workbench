@@ -138,11 +138,22 @@ export function applyAgentEvent(state: ChatState, event: AgentEvent): ChatState 
         approval: null,
       }));
     case 'approvalRequested': {
-      // The engine asks while the tool call it gates is running. Tools run
-      // one at a time, so that is the one still marked running.
-      const target = [...state.items]
-        .reverse()
-        .find((item): item is ToolItem => item.kind === 'tool' && item.status === 'running');
+      // The engine asks while the tool call it gates is running. Several
+      // calls can be running at once, so find the one that sent this
+      // statement: same SQL, same tool, and no prompt of its own yet. If
+      // none matches, take the newest call still waiting for a result.
+      const request = event.data.request;
+      const open = state.items.filter(
+        (item): item is ToolItem =>
+          item.kind === 'tool' && item.status === 'running' && item.approval === null,
+      );
+      const target =
+        open.find(
+          (item) =>
+            request.sql !== null &&
+            item.sql === request.sql &&
+            (request.tool === null || item.tool === request.tool),
+        ) ?? open.at(-1);
       if (!target) {
         // Nothing to attach it to. It still has to be answerable.
         return push(state, (key) => ({

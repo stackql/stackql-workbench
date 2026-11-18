@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use futures_util::future::join_all;
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Notify;
@@ -20,7 +21,7 @@ use tokio::sync::Notify;
 use super::acp::PROTOCOL_VERSION as ACP_VERSION;
 use super::approvals::{ApprovalRequest, Approvals};
 use super::backend::{
-    ChatRequest, InferenceBackend, Message, StopReason, ToolCall, ToolOutcome, Usage,
+    ChatRequest, InferenceBackend, Message, StopReason, ToolCall, ToolOutcome, ToolSpec, Usage,
 };
 use super::copilot;
 use super::delegate::{DelegateSession, ModelOption};
@@ -229,7 +230,7 @@ impl AgentRuntime {
         let stop = lock(&self.stop).clone();
         match stop {
             Some(stop) => {
-                stop.notify_one();
+                signal_stop(&stop);
                 self.approvals.cancel_all();
                 true
             }
@@ -501,31 +502,42 @@ impl AgentRuntime {
                 break;
             }
 
+            // Calls the engine marks as not destructive run at the same
+            // time. The rest run alone, in the order the model gave. Results
+            // go back in the model's order either way.
             let mut outcomes = Vec::with_capacity(calls.len());
-            for call in &calls {
+            for group in groups(&calls, |call| runs_with_others(mcp.tools(), &call.name)) {
                 if summary.stopped {
                     // The provider needs a result for every call it made.
-                    outcomes.push(ToolOutcome {
+                    outcomes.extend(group.iter().map(|call| ToolOutcome {
                         call_id: call.id.clone(),
                         name: call.name.clone(),
                         content: "The operator stopped this turn before this tool ran.".to_string(),
                         is_error: true,
-                    });
+                    }));
                     continue;
                 }
-                summary.tool_calls += 1;
-                match self.run_tool(mcp, call, &stop, &emit).await? {
-                    Some(outcome) => outcomes.push(outcome),
-                    None => {
-                        summary.stopped = true;
-                        outcomes.push(ToolOutcome {
-                            call_id: call.id.clone(),
-                            name: call.name.clone(),
-                            content: "The operator stopped this turn before this tool finished. \
-                                      It may still have taken effect."
-                                .to_string(),
-                            is_error: true,
-                        });
+                summary.tool_calls += group.len();
+                let results = join_all(
+                    group
+                        .iter()
+                        .map(|call| self.run_tool(mcp, call, &stop, &emit)),
+                )
+                .await;
+                for (call, result) in group.iter().zip(results) {
+                    match result? {
+                        Some(outcome) => outcomes.push(outcome),
+                        None => {
+                            summary.stopped = true;
+                            outcomes.push(ToolOutcome {
+                                call_id: call.id.clone(),
+                                name: call.name.clone(),
+                                content: "The operator stopped this turn before this tool \
+                                          finished. It may still have taken effect."
+                                    .to_string(),
+                                is_error: true,
+                            });
+                        }
                     }
                 }
             }
@@ -597,6 +609,52 @@ impl AgentRuntime {
             is_error: result.is_error,
         }))
     }
+}
+
+/// Tells everything that is waiting on a turn to stop. Several tool calls
+/// can be waiting at once, and something may start waiting a moment later,
+/// so this wakes those that wait now and leaves word for the next.
+fn signal_stop(stop: &Notify) {
+    stop.notify_waiters();
+    stop.notify_one();
+}
+
+/// Whether a call may run at the same time as others.
+///
+/// The engine says so, tool by tool, in the `destructiveHint` it publishes:
+/// its query and discovery tools declare that they make no destructive
+/// change, and its mutation and lifecycle tools declare that they can. The
+/// host goes by that and reads nothing into the statement. A tool that does
+/// not say, or one the server does not have, runs alone.
+fn runs_with_others(tools: &[ToolSpec], name: &str) -> bool {
+    tools
+        .iter()
+        .find(|tool| tool.name == name)
+        .is_some_and(|tool| tool.destructive == Some(false))
+}
+
+/// Splits the calls of one reply into groups, kept in the model's order.
+/// The calls of a group run together. Groups run one after another.
+///
+/// Neighbouring calls that may run with others share a group. Any other
+/// call is a group of its own, so what comes after a change sees the change
+/// and what comes before it does not.
+fn groups(calls: &[ToolCall], together: impl Fn(&ToolCall) -> bool) -> Vec<&[ToolCall]> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (index, call) in calls.iter().enumerate() {
+        if !together(call) {
+            if start < index {
+                out.push(&calls[start..index]);
+            }
+            out.push(&calls[index..=index]);
+            start = index + 1;
+        }
+    }
+    if start < calls.len() {
+        out.push(&calls[start..]);
+    }
+    out
 }
 
 fn stopped_message() -> Message {
@@ -813,6 +871,129 @@ mod tests {
             add_usage(Usage::default(), Usage::default()),
             Usage::default()
         );
+    }
+
+    fn call(id: &str, name: &str) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: serde_json::Map::new(),
+        }
+    }
+
+    fn tool(name: &str, destructive: Option<bool>) -> ToolSpec {
+        ToolSpec {
+            name: name.into(),
+            description: String::new(),
+            input_schema: json!({ "type": "object" }),
+            destructive,
+        }
+    }
+
+    /// The ids in each group, for a reply whose calls are `(id, tool)`.
+    fn grouped(calls: &[(&str, &str)]) -> Vec<Vec<String>> {
+        let tools = [
+            tool("run_select_query", Some(false)),
+            tool("list_providers", Some(false)),
+            tool("run_mutation_query", Some(true)),
+            tool("says_nothing", None),
+        ];
+        let calls: Vec<ToolCall> = calls.iter().map(|(id, name)| call(id, name)).collect();
+        groups(&calls, |c| runs_with_others(&tools, &c.name))
+            .into_iter()
+            .map(|group| group.iter().map(|c| c.id.clone()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn only_tools_the_engine_calls_not_destructive_run_with_others() {
+        let tools = [
+            tool("run_select_query", Some(false)),
+            tool("run_mutation_query", Some(true)),
+            tool("says_nothing", None),
+        ];
+        assert!(runs_with_others(&tools, "run_select_query"));
+        assert!(!runs_with_others(&tools, "run_mutation_query"));
+        // No word from the engine is not permission.
+        assert!(!runs_with_others(&tools, "says_nothing"));
+        // Nor is a tool the server does not have.
+        assert!(!runs_with_others(&tools, "made_up_by_the_model"));
+    }
+
+    #[test]
+    fn independent_queries_share_one_group() {
+        assert_eq!(
+            grouped(&[
+                ("a", "run_select_query"),
+                ("b", "list_providers"),
+                ("c", "run_select_query"),
+            ]),
+            [["a", "b", "c"]]
+        );
+    }
+
+    #[test]
+    fn a_change_runs_alone_and_keeps_its_place() {
+        assert_eq!(
+            grouped(&[
+                ("a", "run_select_query"),
+                ("b", "run_select_query"),
+                ("c", "run_mutation_query"),
+                ("d", "run_select_query"),
+                ("e", "run_select_query"),
+            ]),
+            [vec!["a", "b"], vec!["c"], vec!["d", "e"]]
+        );
+        // Two changes in a row do not run together either.
+        assert_eq!(
+            grouped(&[("a", "run_mutation_query"), ("b", "run_mutation_query")]),
+            [["a"], ["b"]]
+        );
+        assert_eq!(
+            grouped(&[("a", "says_nothing"), ("b", "run_select_query")]),
+            [["a"], ["b"]]
+        );
+    }
+
+    #[test]
+    fn every_call_lands_in_exactly_one_group_in_order() {
+        let reply = [
+            ("a", "run_mutation_query"),
+            ("b", "run_select_query"),
+            ("c", "made_up_by_the_model"),
+            ("d", "list_providers"),
+            ("e", "run_select_query"),
+            ("f", "run_mutation_query"),
+        ];
+        let flat: Vec<String> = grouped(&reply).into_iter().flatten().collect();
+        assert_eq!(flat, ["a", "b", "c", "d", "e", "f"]);
+        assert!(grouped(&[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_stop_reaches_everything_that_is_waiting_and_what_waits_next() {
+        let stop = Arc::new(Notify::new());
+        let waiters: Vec<_> = (0..3)
+            .map(|_| {
+                let stop = stop.clone();
+                tokio::spawn(async move { stop.notified().await })
+            })
+            .collect();
+        // Let the three start waiting.
+        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        signal_stop(&stop);
+        for waiter in waiters {
+            tokio::time::timeout(std::time::Duration::from_secs(2), waiter)
+                .await
+                .expect("a waiter was not woken")
+                .unwrap();
+        }
+        // Something that starts waiting after the stop still hears of it.
+        tokio::time::timeout(std::time::Duration::from_secs(2), stop.notified())
+            .await
+            .expect("a late waiter was not told");
     }
 
     #[test]

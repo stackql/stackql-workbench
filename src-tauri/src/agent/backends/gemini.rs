@@ -302,6 +302,7 @@ mod tests {
                 "properties": { "sql": { "type": "string" } },
                 "required": ["sql"]
             }),
+            destructive: Some(false),
         }]
     }
 

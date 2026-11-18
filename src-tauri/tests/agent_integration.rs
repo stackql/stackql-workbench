@@ -382,6 +382,146 @@ async fn a_mutation_waits_for_the_operator_and_a_decline_reaches_the_model() {
     teardown(fx).await;
 }
 
+/// Where in the stream of events a call started.
+fn started_at(events: &[AgentEvent], call: &str) -> usize {
+    events
+        .iter()
+        .position(|e| matches!(e, AgentEvent::ToolCallStarted { id, .. } if id == call))
+        .unwrap_or_else(|| panic!("{call} never started"))
+}
+
+/// Where in the stream of events a call finished.
+fn finished_at(events: &[AgentEvent], call: &str) -> usize {
+    events
+        .iter()
+        .position(|e| matches!(e, AgentEvent::ToolCallFinished { id, .. } if id == call))
+        .unwrap_or_else(|| panic!("{call} never finished"))
+}
+
+#[tokio::test]
+async fn independent_calls_in_one_reply_run_together_and_answer_in_order() {
+    if !engine_available() {
+        return;
+    }
+    let fx = fixture("together").await;
+    let model = Scripted::new(vec![
+        calls(&[
+            (
+                "c1",
+                "run_select_query",
+                json!({ "sql": "SELECT 1 AS one" }),
+            ),
+            ("c2", "list_providers", json!({})),
+            (
+                "c3",
+                "run_select_query",
+                json!({ "sql": "SELECT 2 AS two" }),
+            ),
+        ]),
+        says("All three are in."),
+    ]);
+    let (emit, events) = collector();
+
+    let summary = fx
+        .runtime
+        .send(
+            model.clone(),
+            SafetyMode::Safe,
+            "three things at once".into(),
+            emit,
+        )
+        .await
+        .unwrap();
+    assert_eq!(summary.steps, 2);
+    assert_eq!(summary.tool_calls, 3);
+
+    // The engine marks all three tools as not destructive, so every call
+    // was under way before the first of them finished.
+    let events = events.lock().unwrap().clone();
+    let first_done = ["c1", "c2", "c3"]
+        .iter()
+        .map(|call| finished_at(&events, call))
+        .min()
+        .unwrap();
+    for call in ["c1", "c2", "c3"] {
+        assert!(
+            started_at(&events, call) < first_done,
+            "{call} did not start until another call had finished"
+        );
+    }
+
+    // The model gets one answer per call, in the order it asked.
+    let results = tool_results(&model.seen()[1]);
+    assert_eq!(results.len(), 3);
+    assert!(results.iter().all(|(_, is_error)| !is_error), "{results:?}");
+    assert!(results[0].0.contains("one"), "{}", results[0].0);
+    assert!(results[1].0.contains("stackql_preview"), "{}", results[1].0);
+    assert!(results[2].0.contains("two"), "{}", results[2].0);
+
+    teardown(fx).await;
+}
+
+#[tokio::test]
+async fn a_change_runs_alone_between_the_calls_around_it() {
+    if !engine_available() {
+        return;
+    }
+    let fx = fixture("ordered").await;
+    let model = Scripted::new(vec![
+        calls(&[
+            (
+                "c1",
+                "run_select_query",
+                json!({ "sql": "SELECT 1 AS one" }),
+            ),
+            ("c2", "run_mutation_query", json!({ "sql": DELETE_SQL })),
+            (
+                "c3",
+                "run_select_query",
+                json!({ "sql": "SELECT 2 AS two" }),
+            ),
+        ]),
+        says("The delete was declined."),
+    ]);
+    let (emit, events) = answering(&fx.runtime, ApprovalDecision::Decline);
+
+    let summary = fx
+        .runtime
+        .send(
+            model.clone(),
+            SafetyMode::Safe,
+            "query, delete, query".into(),
+            emit,
+        )
+        .await
+        .unwrap();
+    assert_eq!(summary.tool_calls, 3);
+
+    // The engine marks the mutation tool as destructive. It waits for what
+    // came before it, and what comes after waits for it.
+    let events = events.lock().unwrap().clone();
+    assert!(finished_at(&events, "c1") < started_at(&events, "c2"));
+    assert!(finished_at(&events, "c2") < started_at(&events, "c3"));
+
+    // The prompt was for the change, and the operator's answer stood.
+    let asked: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::ApprovalRequested { request } => Some(request.sql.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asked, [Some(DELETE_SQL.to_string())]);
+
+    let results = tool_results(&model.seen()[1]);
+    assert_eq!(results.len(), 3);
+    assert!(!results[0].1 && results[0].0.contains("one"));
+    assert!(results[1].1 && results[1].0.contains("declined"));
+    assert!(!results[2].1 && results[2].0.contains("two"));
+
+    teardown(fx).await;
+}
+
 #[tokio::test]
 async fn read_only_mode_refuses_without_asking() {
     if !engine_available() {

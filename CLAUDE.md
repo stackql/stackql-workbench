@@ -230,6 +230,8 @@ How the server behaves:
 - The handshake returns about 25,000 characters of guidance for the model. The host puts it in the system prompt.
 - A provider call that fails comes back as a tool error: `upstream http error: {"http_status": 401, "retryable": false}: ...`. A lookup that finds nothing comes back as an empty result with no error, and what the provider said is on the server's stderr. The server's instructions tell a model how to read each. The host shows the stderr line to the operator beside the tool result and adds nothing to what the model receives. See Provider errors and empty results.
 - A statement the server cannot parse is classed `unknown` and asks for approval, even through the read tool.
+- Every tool carries hints. The tools that take no SQL say they are read-only. The SQL tools never claim that, because what they do depends on the statement, but each says whether it can make a destructive change: `run_mutation_query` and `run_lifecycle_operation` can, the rest cannot.
+- One server runs tool calls at the same time. Four single-request statements sent together were answered in about the time of one.
 - The server exits when its stdin closes.
 
 How the host uses it:
@@ -293,6 +295,8 @@ How they are built:
 - Each keeps the provider's own form of a reply and replays it as it was. Do not rebuild a reply from its parsed parts.
 - No sampling parameters are sent. Current models from all three providers ignore or reject them.
 - Replies are not streamed. A turn shows progress per tool call.
+- The tool calls of one reply run at the same time when the engine marks the tool as not destructive, with `destructiveHint: false`. That covers its query and discovery tools. A tool the engine marks as destructive, or one that carries no hint, runs alone and in the model's order, so what follows a change sees the change. The host takes the engine's word for this and reads nothing into the statement. Results go back to the model in the order it asked.
+- More than one approval prompt can be open at once. A prompt is shown on the tool call that sent the statement.
 - The API key is read from the keychain when a turn starts. Settings hold the backend, the model and the address, never the key.
 
 What exists now under item 3 is the GitHub Copilot CLI. Every point was tested. See `docs/spike-acp.md`.

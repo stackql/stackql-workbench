@@ -285,6 +285,7 @@ mod tests {
             name: "run_select_query".into(),
             description: "Execute a SELECT.".into(),
             input_schema: json!({ "type": "object", "properties": { "sql": { "type": "string" } }, "required": ["sql"] }),
+            destructive: Some(false),
         }]
     }
 

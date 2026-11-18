@@ -241,7 +241,17 @@ This was measured on 18 November 2026, after the rest of this report, to see whe
 
 So one server does run tool calls at the same time: four together took about as long as one. The late answer in the first run was not explained. This is three runs of small statements, not a load test, and statements that fan out to many provider requests were not tried.
 
-The host's own loop does not use this yet. It runs the tool calls of one model reply one after another.
+The host's loop uses this. The tool calls of one model reply run at the same time when the engine marks the tool as not destructive. The engine publishes that on every tool, as `destructiveHint`:
+
+```
+run_select_query           {"destructiveHint":false,"readOnlyHint":false, ...}
+list_providers             {"destructiveHint":false,"readOnlyHint":true, ...}
+pull_provider              {"destructiveHint":false,"readOnlyHint":false,"idempotentHint":true, ...}
+run_mutation_query         {"destructiveHint":true,"readOnlyHint":false, ...}
+run_lifecycle_operation    {"destructiveHint":true,"readOnlyHint":false, ...}
+```
+
+A tool marked destructive, or one with no hint, runs alone and in the model's order. The SQL tools are not marked read-only on purpose: the engine's source says they make no such claim because their effect depends on the statement, and that the gate refuses write-class statements on the query tool.
 
 ## Open items for the maintainer
 

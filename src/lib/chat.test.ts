@@ -178,6 +178,64 @@ describe('approval', () => {
   });
 });
 
+describe('approval while several calls run', () => {
+  const OTHER_SQL = "DELETE FROM github.repos.repos WHERE owner = 'x' AND repo = 'z'";
+  const ask = (id: string, sql: string): AgentEvent => ({
+    event: 'approvalRequested',
+    data: { request: { ...request, id, sql, message: `Approve?\n\nSQL: ${sql}` } },
+  });
+
+  it('goes to the call that sent the statement, not to the newest one', () => {
+    const state = play([
+      started('c1', 'run_mutation_query', DELETE_SQL),
+      started('c2', 'run_mutation_query', OTHER_SQL),
+      started('c3', 'run_select_query', 'SELECT 1'),
+      ask('approval-1', DELETE_SQL),
+    ]);
+    const [first, second, third] = tools(state);
+    expect(first?.approval?.request.id).toBe('approval-1');
+    expect(second?.approval).toBeNull();
+    expect(third?.approval).toBeNull();
+  });
+
+  it('gives two calls with the same statement a prompt each', () => {
+    const state = play([
+      started('c1', 'run_mutation_query', DELETE_SQL),
+      started('c2', 'run_mutation_query', DELETE_SQL),
+      ask('approval-1', DELETE_SQL),
+      ask('approval-2', DELETE_SQL),
+    ]);
+    const [first, second] = tools(state);
+    expect(first?.approval?.request.id).toBe('approval-1');
+    expect(second?.approval?.request.id).toBe('approval-2');
+    expect(pendingApprovals(state)).toHaveLength(2);
+  });
+
+  it('answers each prompt on its own', () => {
+    let state = play([
+      started('c1', 'run_mutation_query', DELETE_SQL),
+      started('c2', 'run_mutation_query', OTHER_SQL),
+      ask('approval-1', DELETE_SQL),
+      ask('approval-2', OTHER_SQL),
+    ]);
+    state = approvalAnswered(state, 'approval-2', 'decline');
+    const [first, second] = tools(state);
+    expect(first?.approval?.decision).toBe('pending');
+    expect(second?.approval?.decision).toBe('decline');
+  });
+
+  it('falls back to the newest call still waiting when nothing matches', () => {
+    const state = play([
+      started('c1', 'run_select_query', 'SELECT 1'),
+      started('c2', 'run_select_query', 'SELECT 2'),
+      ask('approval-1', 'SELECT something else'),
+    ]);
+    const [first, second] = tools(state);
+    expect(first?.approval).toBeNull();
+    expect(second?.approval?.request.id).toBe('approval-1');
+  });
+});
+
 describe('the end of a turn', () => {
   it('clears busy', () => {
     const state = turnFinished(play([{ event: 'assistantText', data: { text: 'hi' } }]), summary());
