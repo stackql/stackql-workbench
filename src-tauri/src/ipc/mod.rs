@@ -214,6 +214,19 @@ pub async fn explorer_providers(state: State<'_, AppState>) -> HostResult<Vec<Pr
     )?))
 }
 
+/// What the registry offers. The engine asks the registry, so this needs
+/// the network. It runs when the explorer loads and when the operator asks.
+#[tauri::command]
+pub async fn explorer_registry(state: State<'_, AppState>) -> HostResult<Vec<Provider>> {
+    let result = state
+        .connection
+        .fetch(explorer::REGISTRY_LIST_SQL.to_string())
+        .await?;
+    Ok(explorer::visible_providers(explorer::map_registry(
+        &result,
+    )?))
+}
+
 #[tauri::command]
 pub async fn explorer_services(
     state: State<'_, AppState>,

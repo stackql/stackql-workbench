@@ -395,6 +395,16 @@ Notes for the explorer:
 - A column name that is a reserved word, such as `desc`, must be written in double quotes.
 - `SHOW EXTENDED METHODS` on a large provider took 251 ms the first time, while the provider document loaded. Everything else took single-digit milliseconds.
 
+Notes on the registry and on generated statements, tested on 18 November 2026 against v1.0.888 with `stackql exec` and a data folder of its own:
+
+- `REGISTRY LIST` gives one row for each provider, 44 of them, with the newest version only. `REGISTRY LIST <provider>` gives one row with every version in a `versions` column.
+- Every provider name in the registry is a plain identifier.
+- With an older version installed, `SHOW PROVIDERS` reports that older version, so comparing it with `REGISTRY LIST` shows that an update exists. Versions have the form `v26.08.00448` and compare by their three numbers.
+- `REGISTRY PULL <provider>` with no version installs the newest one and replaces the older one. The data folder then holds only the newer version. `REGISTRY PULL "github"` with the name in double quotes works too.
+- A double-quoted name in a select list is read as a column, not as a string. `SELECT "name", language FROM github.repos.repos WHERE org = 'stackql'` returned the names.
+- A `SELECT` that lists all 90 output fields of `github.repos.repos.list_for_org` ran. None of those names needed quoting.
+- Request body fields of the GitHub provider are reported with a `data__` prefix, for example `data__name`. A generated statement uses the reported names as they are, which is what the engine's own guidance asks for.
+
 ## Readiness
 
 The engine was started five times and polled, with each connect attempt limited to 40 ms.

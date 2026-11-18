@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { host } from './host';
 import { chatTitle, type ToolItem } from './lib/chat';
 import { commandForKey, type CommandId } from './lib/menu';
@@ -7,7 +7,7 @@ import { ActivityPane } from './panes/activity/ActivityPane';
 import { ChatPane } from './panes/chat/ChatPane';
 import { Editor } from './panes/editor/Editor';
 import { TabStrip } from './panes/editor/TabStrip';
-import { Explorer } from './panes/explorer/Explorer';
+import { Explorer, type ExplorerHandle } from './panes/explorer/Explorer';
 import { Results } from './panes/results/Results';
 import { ChatSettings } from './panes/settings/ChatSettings';
 import { SettingsDialog } from './panes/settings/SettingsDialog';
@@ -33,8 +33,22 @@ SHOW PROVIDERS;
 
 const IS_MAC = /Mac/i.test(navigator.userAgent);
 const RUN_SHORTCUT = IS_MAC ? 'Cmd+Enter' : 'Ctrl+Enter';
+const JUMP_SHORTCUT = IS_MAC ? 'Cmd+P' : 'Ctrl+P';
+const EXPLORER_WIDTH_KEY = 'workbench.explorer.width';
+const EXPLORER_WIDTH = { min: 160, max: 640, initial: 300 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+function savedExplorerWidth(): number {
+  try {
+    const saved = Number(window.localStorage.getItem(EXPLORER_WIDTH_KEY));
+    return Number.isFinite(saved) && saved > 0
+      ? clamp(saved, EXPLORER_WIDTH.min, EXPLORER_WIDTH.max)
+      : EXPLORER_WIDTH.initial;
+  } catch {
+    return EXPLORER_WIDTH.initial;
+  }
+}
 
 /** Editing commands the webview carries out on whatever has the cursor. */
 function editInPlace(action: 'undo' | 'redo' | 'cut' | 'copy' | 'selectAll') {
@@ -69,7 +83,8 @@ export function App() {
   // Chat is where the app opens. The explorer and activity are a click away.
   const [view, setView] = useState<View>('chat');
   const [navCollapsed, setNavCollapsed] = useState(false);
-  const [explorerWidth, setExplorerWidth] = useState(300);
+  const [explorerWidth, setExplorerWidth] = useState(savedExplorerWidth);
+  const explorer = useRef<ExplorerHandle>(null);
   const [editorHeight, setEditorHeight] = useState(240);
   // Which part of settings is open, if any.
   const [settings, setSettings] = useState<'engine' | 'model' | null>(null);
@@ -114,6 +129,14 @@ export function App() {
     },
     [running, runQuery],
   );
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(EXPLORER_WIDTH_KEY, String(explorerWidth));
+    } catch {
+      // The width is a convenience.
+    }
+  }, [explorerWidth]);
 
   const restart = useCallback(() => {
     setRestarting(true);
@@ -208,6 +231,10 @@ export function App() {
           setExplorerToken((token) => token + 1);
           setView('explorer');
           break;
+        case 'goToResource':
+          setView('explorer');
+          explorer.current?.jump();
+          break;
         case 'exit':
           void host.closeWindow().catch(() => undefined);
           break;
@@ -301,16 +328,28 @@ export function App() {
           <div className={view === 'explorer' ? 'flex h-full' : 'hidden'} data-view="explorer">
             <div className="shrink-0" style={{ width: explorerWidth }}>
               <Explorer
+                ref={explorer}
                 engineRunning={engineRunning}
+                canRun={engineRunning && !running}
                 refreshToken={explorerToken}
+                jumpShortcut={JUMP_SHORTCUT}
                 onInsert={(text) => activeEditor()?.insert(text)}
+                onOpenStatement={openTab}
+                onRunStatement={(sql, inTab) => {
+                  if (inTab) {
+                    openTab(`${sql}\n`);
+                  }
+                  run(sql);
+                }}
               />
             </div>
             <Splitter
               orientation="vertical"
               label="Resize explorer"
               onResize={(delta) => {
-                setExplorerWidth((width) => clamp(width + delta, 160, 640));
+                setExplorerWidth((width) =>
+                  clamp(width + delta, EXPLORER_WIDTH.min, EXPLORER_WIDTH.max),
+                );
               }}
             />
 

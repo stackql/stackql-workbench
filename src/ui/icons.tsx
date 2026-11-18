@@ -200,3 +200,24 @@ export const Plus = (p: IconProps) => (
     <path d="M8 3v10M3 8h10" />
   </Svg>
 );
+
+export const More = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="3.5" cy="8" r="1" fill="currentColor" />
+    <circle cx="8" cy="8" r="1" fill="currentColor" />
+    <circle cx="12.5" cy="8" r="1" fill="currentColor" />
+  </Svg>
+);
+
+export const GoTo = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2 8h8.5M7.5 4.75 10.75 8 7.5 11.25M13.5 3v10" />
+  </Svg>
+);
+
+export const Search = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="7" cy="7" r="4" />
+    <path d="m10 10 3.5 3.5" />
+  </Svg>
+);

@@ -86,7 +86,7 @@ The layout is below. Keep it current as the code lands.
 stackql-workbench/
   src/                  webview (React)
     host/               typed wrappers over IPC, the only Tauri imports
-    lib/                pure logic with tests: results, cells, explorer tree, chat, activity, menu, markdown
+    lib/                pure logic with tests: results, cells, explorer tree, statement templates, tabs, chat, activity, menu, markdown
     state/              hooks that connect the host to the panes
     panes/              shell (menu bar, side menu), chat, explorer, editor, results, activity, settings, statusbar
     ui/                 small shared components
@@ -335,6 +335,10 @@ A few fixed points for the interface.
 - Replies are read as markdown by a small reader in `src/lib/markdown.ts` that builds a tree. Model output is never turned into HTML. Links are shown and never opened.
 - Under a method the explorer groups fields into Inputs and Outputs, both collapsed until opened. A field is an input when the engine's param type starts with `input`, and an output otherwise.
 - The explorer does not list `stackql_preview`, the provider built into the engine. It is hidden for now and may come back. The name is in `HIDDEN_PROVIDERS` in `query/explorer.rs` and nowhere else. Only the tree leaves it out: `SHOW PROVIDERS` in the editor and the engine's answers to a model are not filtered.
+- The explorer filter looks only at what has been loaded, and nothing is fetched on a keystroke. Starting a filter reads each provider's services, one statement for each provider. Enter reads the resources of every service not opened yet, four at a time, with progress, and Esc stops it. Methods are matched where a resource's methods have been opened. Under a filter at most 400 rows are drawn.
+- A statement generated from the explorer opens in a new tab and does not run. It is a template built from what the engine reports for the method, with `<name>` where a value is needed. `DESCRIBE EXTENDED` from the menu, and installing or updating a provider, run on the human channel like anything else the operator runs, so they are in the history.
+- A provider shows an update marker when `REGISTRY LIST` has a newer version than `SHOW PROVIDERS` reports. The engine asks the registry, so this needs the network. When it cannot be asked, no marker is shown.
+- A method's SQL verb is drawn as a pill before its name, in one colour for SELECT and another for the rest. The colour follows the verb the engine reports and decides nothing.
 - Nested JSON is common in results. The grid needs a cell viewer for it.
 
 ## Conventions

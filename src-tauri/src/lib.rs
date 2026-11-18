@@ -104,6 +104,7 @@ pub fn run() {
             ipc::clipboard_write_text,
             ipc::provider_icons,
             ipc::explorer_providers,
+            ipc::explorer_registry,
             ipc::explorer_services,
             ipc::explorer_resources,
             ipc::explorer_methods,

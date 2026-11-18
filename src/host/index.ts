@@ -136,6 +136,8 @@ export const host = {
 
   explorer: {
     providers: () => invoke<Provider[]>('explorer_providers'),
+    /** What the registry offers, with the version of each. Needs the network. */
+    registry: () => invoke<Provider[]>('explorer_registry'),
     services: (provider: string) => invoke<Service[]>('explorer_services', { provider }),
     resources: (provider: string, service: string) =>
       invoke<Resource[]>('explorer_resources', { provider, service }),

@@ -66,6 +66,7 @@ describe('commandForKey', () => {
     expect(commandForKey(press('3', { ctrlKey: true }), false)).toBe('showActivity');
     expect(commandForKey(press('b', { ctrlKey: true }), false)).toBe('toggleSidebar');
     expect(commandForKey(press('t', { ctrlKey: true }), false)).toBe('newTab');
+    expect(commandForKey(press('p', { ctrlKey: true }), false)).toBe('goToResource');
   });
 
   it('uses Cmd on macOS, not Ctrl', () => {

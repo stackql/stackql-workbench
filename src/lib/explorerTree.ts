@@ -37,6 +37,8 @@ export interface TreeNode {
   path: NodePath;
   /** Children already in hand, for a group whose members arrived with its parent. */
   children?: TreeNode[];
+  /** For a method: its SQL verb, in capitals. */
+  verb?: string;
 }
 
 /** The slice of the host API the tree needs. */
@@ -61,6 +63,21 @@ export function qualifiedName(path: NodePath): string {
     .join('.');
 }
 
+/**
+ * What a row shows on hover: the whole name first, because the row may be
+ * cut short, then what the engine says about it.
+ */
+export function hoverText(node: TreeNode): string {
+  const named =
+    node.kind === 'field' || node.kind === 'param'
+      ? [node.label, node.detail].filter(Boolean).join(' ')
+      : [node.verb, node.copyText ?? node.label, node.kind === 'provider' ? node.detail : '']
+          .filter(Boolean)
+          .join(' ');
+  const about = node.kind === 'provider' ? '' : node.title;
+  return about !== '' && about !== named && about !== node.copyText ? `${named}\n${about}` : named;
+}
+
 const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
 
 export function providerNodes(providers: Provider[]): TreeNode[] {
@@ -79,11 +96,15 @@ export function providerNodes(providers: Provider[]): TreeNode[] {
 export function serviceNodes(provider: string, services: Service[]): TreeNode[] {
   return [...services].sort(byName).map((service) => {
     const path = { provider, service: service.name };
+    // A title that only repeats the name, such as "ec2 API", says nothing.
+    const title = service.title.trim().toLowerCase();
+    const name = service.name.toLowerCase();
+    const repeats = title === name || title === `${name} api`;
     return {
       id: `s:${qualifiedName(path)}`,
       kind: 'service',
       label: service.name,
-      detail: service.title !== service.name ? service.title : '',
+      detail: repeats ? '' : service.title,
       title: service.description || service.title || qualifiedName(path),
       copyText: qualifiedName(path),
       expandable: true,
@@ -165,7 +186,9 @@ export function methodNodes(path: NodePath, methods: Method[]): TreeNode[] {
       id: `m:${qualifiedName(methodPath)}`,
       kind: 'method',
       label: method.name,
-      detail: method.sqlVerb,
+      // The verb is drawn as a pill before the name, not as trailing text.
+      detail: '',
+      verb: method.sqlVerb.toUpperCase(),
       title: [method.description, params].filter(Boolean).join('\n'),
       copyText: qualifiedName(methodPath),
       expandable: true,
@@ -307,6 +330,8 @@ export interface VisibleRow {
   expanded: boolean;
   /** Set on the row of an expanded node whose children are loading or failed. */
   state: ChildState | undefined;
+  /** Under a filter: this node's own name matched. */
+  matched?: boolean;
 }
 
 /** Flattens the expanded part of the tree into the rows to draw, top to bottom. */
@@ -328,4 +353,127 @@ export function visibleRows(
   };
   walk(roots, 0);
   return rows;
+}
+
+/** The kinds of node a filter looks at. Groups, fields and parameters are not searched. */
+const SEARCHED: ReadonlySet<NodeKind> = new Set(['provider', 'service', 'resource', 'method']);
+
+/**
+ * The rows to draw under a filter. A node is shown when its own name holds
+ * the text, or when something loaded beneath it does. A node with a match
+ * beneath it is drawn open, so matches keep their parents in view. A node
+ * that matched by its own name shows its children only when the operator
+ * opened it.
+ *
+ * Only what has been loaded is looked at. Nothing is fetched here.
+ */
+export function filterRows(
+  roots: TreeNode[],
+  expanded: ReadonlySet<string>,
+  children: ReadonlyMap<string, ChildState>,
+  query: string,
+): VisibleRow[] {
+  const text = query.trim().toLowerCase();
+  if (text === '') {
+    return visibleRows(roots, expanded, children);
+  }
+  const visit = (node: TreeNode, depth: number): VisibleRow[] => {
+    const state = children.get(node.id);
+    const kids = state?.status === 'loaded' ? state.nodes : [];
+    const below = kids.flatMap((kid) => visit(kid, depth + 1));
+    const matched = SEARCHED.has(node.kind) && node.label.toLowerCase().includes(text);
+    if (!matched && below.length === 0) {
+      return [];
+    }
+    const opened = expanded.has(node.id);
+    const row: VisibleRow = {
+      node,
+      depth,
+      expanded: below.length > 0 || opened,
+      state: below.length > 0 || opened ? state : undefined,
+      matched,
+    };
+    if (below.length > 0) {
+      return [row, ...below];
+    }
+    // Matched by name, nothing matching beneath: opened by hand, it shows
+    // everything it has.
+    if (opened && state?.status === 'loaded') {
+      const all: VisibleRow[] = [];
+      const walk = (nodes: TreeNode[], at: number) => {
+        for (const kid of nodes) {
+          const kidState = expanded.has(kid.id) ? children.get(kid.id) : undefined;
+          all.push({ node: kid, depth: at, expanded: expanded.has(kid.id), state: kidState });
+          if (kidState?.status === 'loaded') {
+            walk(kidState.nodes, at + 1);
+          }
+        }
+      };
+      walk(kids, depth + 1);
+      return [row, ...all];
+    }
+    return [row];
+  };
+  return roots.flatMap((root) => visit(root, 0));
+}
+
+/** The services whose resources have not been loaded, across loaded providers. */
+export function unopenedServices(
+  roots: TreeNode[],
+  children: ReadonlyMap<string, ChildState>,
+): TreeNode[] {
+  return roots.flatMap((root) => {
+    const state = children.get(root.id);
+    const services = state?.status === 'loaded' ? state.nodes : [];
+    return services.filter((service) => !children.has(service.id));
+  });
+}
+
+/**
+ * Reads `provider`, `provider.service` or `provider.service.resource` as
+ * typed into the jump box. A part may be in double quotes. Null when the
+ * text is not one to three names.
+ */
+export function parseJump(text: string): NodePath | null {
+  const parts = text
+    .trim()
+    .replace(/;$/, '')
+    .split('.')
+    .map((part) => part.trim().replace(/^"(.*)"$/, '$1'));
+  if (parts.length < 1 || parts.length > 3 || parts.some((part) => part === '')) {
+    return null;
+  }
+  const [provider, service, resource] = parts;
+  if (provider === undefined) {
+    return null;
+  }
+  return {
+    provider,
+    ...(service !== undefined ? { service } : {}),
+    ...(resource !== undefined ? { resource } : {}),
+  };
+}
+
+/**
+ * Compares two provider versions of the form `v26.08.00444`. Negative when
+ * `a` is older, positive when newer, zero when the same. Null when either
+ * is not of that form, in which case nothing is claimed about them.
+ */
+export function compareVersions(a: string, b: string): number | null {
+  const parse = (value: string) => {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
+    return match ? match.slice(1).map(Number) : null;
+  };
+  const left = parse(a);
+  const right = parse(b);
+  if (!left || !right) {
+    return null;
+  }
+  for (let i = 0; i < 3; i += 1) {
+    const difference = (left[i] ?? 0) - (right[i] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return 0;
 }

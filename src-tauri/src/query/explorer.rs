@@ -47,6 +47,8 @@ fn qualified(parts: &[&str]) -> HostResult<String> {
 }
 
 pub const PROVIDERS_SQL: &str = "SHOW PROVIDERS";
+/// What the registry offers: one row for each provider, with its version.
+pub const REGISTRY_LIST_SQL: &str = "REGISTRY LIST";
 
 pub fn services_sql(provider: &str) -> HostResult<String> {
     Ok(format!(
@@ -187,6 +189,21 @@ fn opt_cell(row: &Row, index: Option<usize>) -> String {
 pub fn map_providers(result: &ResultSet) -> HostResult<Vec<Provider>> {
     let reader = Reader::new(result, "SHOW PROVIDERS");
     let name = reader.required("name")?;
+    let version = reader.optional("version");
+    Ok(result
+        .rows
+        .iter()
+        .map(|row| Provider {
+            name: cell(row, name),
+            version: opt_cell(row, version),
+        })
+        .collect())
+}
+
+/// Maps `REGISTRY LIST`. The provider's name is in the `provider` column.
+pub fn map_registry(result: &ResultSet) -> HostResult<Vec<Provider>> {
+    let reader = Reader::new(result, "REGISTRY LIST");
+    let name = reader.required("provider")?;
     let version = reader.optional("version");
     Ok(result
         .rows
@@ -339,6 +356,20 @@ mod tests {
         let names: Vec<&str> = shown.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["github", "aws", "stackql_preview_extras"]);
         assert!(visible_providers(vec![provider("stackql_preview")]).is_empty());
+    }
+
+    #[test]
+    fn the_registry_listing_is_read_by_its_own_column_names() {
+        let listed = map_registry(&result(
+            &["provider", "version"],
+            &[&["aws", "v26.11.00490"], &["github", "v26.08.00448"]],
+        ))
+        .unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[1].name, "github");
+        assert_eq!(listed[1].version, "v26.08.00448");
+        // SHOW PROVIDERS names the column differently, so it is not a listing.
+        assert!(map_registry(&result(&["name", "version"], &[&["aws", "v1"]])).is_err());
     }
 
     #[test]

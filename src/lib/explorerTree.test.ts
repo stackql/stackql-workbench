@@ -3,8 +3,13 @@ import {
   fieldNodes,
   loadChildren,
   methodNodes,
+  compareVersions,
+  filterRows,
+  hoverText,
   methodGroupNodes,
   paramNodes,
+  parseJump,
+  unopenedServices,
   providerNodes,
   qualifiedName,
   resourceGroupNodes,
@@ -99,7 +104,8 @@ describe('nodes', () => {
       },
     ]);
     expect(method).toMatchObject({
-      detail: 'SELECT',
+      verb: 'SELECT',
+      detail: '',
       copyText: 'github.repos.repos.list_for_org',
       expandable: true,
     });
@@ -324,5 +330,154 @@ describe('visibleRows', () => {
     );
     expect(failed[0]?.state).toEqual({ status: 'error', message: 'nope' });
     expect(failed).toHaveLength(2);
+  });
+});
+
+describe('filterRows', () => {
+  const roots = providerNodes([
+    { name: 'aws', version: 'v1' },
+    { name: 'github', version: 'v2' },
+  ]);
+  const [aws, github] = roots;
+  const awsServices = serviceNodes('aws', [
+    { name: 'ec2', id: '', title: '', description: '' },
+    { name: 's3', id: '', title: '', description: '' },
+  ]);
+  const githubServices = serviceNodes('github', [
+    { name: 'repos', id: '', title: '', description: '' },
+  ]);
+  const reposResources = resourceNodes('github', 'repos', [
+    { name: 'repos', id: '', description: '' },
+    { name: 'branches', id: '', description: '' },
+  ]);
+  const loaded = (nodes: ReturnType<typeof providerNodes>) => ({
+    status: 'loaded' as const,
+    nodes,
+  });
+  if (!aws || !github || !githubServices[0]) {
+    throw new Error('fixtures missing');
+  }
+  const children = new Map([
+    [aws.id, loaded(awsServices)],
+    [github.id, loaded(githubServices)],
+    [githubServices[0].id, loaded(reposResources)],
+  ]);
+  const labels = (query: string, expanded = new Set<string>()) =>
+    filterRows(roots, expanded, children, query).map((row) => `${row.depth}:${row.node.label}`);
+
+  it('is the plain tree when the filter is empty', () => {
+    expect(labels('')).toEqual(['0:aws', '0:github']);
+    expect(labels('   ')).toEqual(['0:aws', '0:github']);
+  });
+
+  it('keeps the parents of a match in view, opened', () => {
+    expect(labels('branch')).toEqual(['0:github', '1:repos', '2:branches']);
+    const rows = filterRows(roots, new Set(), children, 'branch');
+    expect(rows.map((row) => row.expanded)).toEqual([true, true, false]);
+    expect(rows.map((row) => row.matched)).toEqual([false, false, true]);
+  });
+
+  it('matches part of a name at any level, without regard to case', () => {
+    expect(labels('EC')).toEqual(['0:aws', '1:ec2']);
+    expect(labels('git')).toEqual(['0:github']);
+    // The service and the resource of the same name both match.
+    expect(labels('repo')).toEqual(['0:github', '1:repos', '2:repos']);
+  });
+
+  it('shows nothing when nothing loaded matches', () => {
+    expect(labels('lambda')).toEqual([]);
+  });
+
+  it('lets a node that matched by name be opened to show all it has', () => {
+    expect(labels('git', new Set([github.id]))).toEqual(['0:github', '1:repos']);
+  });
+
+  it('does not match on the Fields and Methods groups', () => {
+    const [resource] = reposResources;
+    if (!resource) {
+      throw new Error('fixture missing');
+    }
+    const withGroups = new Map(children).set(resource.id, {
+      status: 'loaded' as const,
+      nodes: resourceGroupNodes(resource.path),
+    });
+    const rows = filterRows(roots, new Set(), withGroups, 'methods');
+    expect(rows).toEqual([]);
+  });
+
+  it('counts the services whose resources are not loaded yet', () => {
+    expect(unopenedServices(roots, children).map((node) => node.label)).toEqual(['ec2', 's3']);
+    // A provider whose services are not loaded contributes none.
+    expect(unopenedServices(roots, new Map())).toEqual([]);
+  });
+});
+
+describe('parseJump', () => {
+  it('reads one to three dotted names', () => {
+    expect(parseJump('github')).toEqual({ provider: 'github' });
+    expect(parseJump('github.repos')).toEqual({ provider: 'github', service: 'repos' });
+    expect(parseJump(' aws.ec2.instances; ')).toEqual({
+      provider: 'aws',
+      service: 'ec2',
+      resource: 'instances',
+    });
+    expect(parseJump('"aws"."ec2"."instances"')).toEqual({
+      provider: 'aws',
+      service: 'ec2',
+      resource: 'instances',
+    });
+  });
+
+  it('refuses anything else', () => {
+    for (const bad of ['', '.', 'aws.', '.ec2', 'a..b', 'a.b.c.d']) {
+      expect(parseJump(bad)).toBeNull();
+    }
+  });
+});
+
+describe('compareVersions', () => {
+  it('orders versions by their numbers, not as text', () => {
+    expect(compareVersions('v26.08.00444', 'v26.09.00461')).toBeLessThan(0);
+    expect(compareVersions('v26.09.00461', 'v26.08.00444')).toBeGreaterThan(0);
+    expect(compareVersions('v26.08.00444', 'v26.08.00444')).toBe(0);
+    expect(compareVersions('v9.1.5', 'v10.0.0')).toBeLessThan(0);
+    expect(compareVersions('26.08.444', 'v26.08.00444')).toBe(0);
+  });
+
+  it('claims nothing about a version it cannot read', () => {
+    expect(compareVersions('internal', 'v1.0.0')).toBeNull();
+    expect(compareVersions('v1.0', 'v1.0.0')).toBeNull();
+    expect(compareVersions('', '')).toBeNull();
+  });
+});
+
+describe('hoverText', () => {
+  it('leads with the whole name, then what the engine says', () => {
+    const [service] = serviceNodes('github', [
+      { name: 'repos', id: 'repos:v1', title: 'repos API', description: 'Repositories.' },
+    ]);
+    expect(service && hoverText(service)).toBe('github.repos\nRepositories.');
+    const [resource] = resourceNodes('github', 'repos', [
+      { name: 'repos', id: 'github.repos.repos', description: '' },
+    ]);
+    expect(resource && hoverText(resource)).toBe('github.repos.repos');
+  });
+
+  it('names the verb of a method', () => {
+    const [method] = methodNodes({ provider: 'github', service: 'repos', resource: 'repos' }, [
+      { name: 'list_for_org', sqlVerb: 'select', requiredParams: ['org'], description: '' },
+    ]);
+    expect(method && hoverText(method)).toBe(
+      'SELECT github.repos.repos.list_for_org\nRequired: org',
+    );
+  });
+
+  it('gives a provider its version and a field its type', () => {
+    const [provider] = providerNodes([{ name: 'github', version: 'v26.08.00448' }]);
+    expect(provider && hoverText(provider)).toBe('github v26.08.00448');
+    const [field] = fieldNodes({ provider: 'github', service: 'repos', resource: 'repos' }, [
+      { name: 'stargazers_count', type: 'integer', description: 'Stars.' },
+    ]);
+    expect(field && hoverText(field)).toBe('stargazers_count integer\nStars.');
   });
 });

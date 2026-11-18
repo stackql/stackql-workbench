@@ -12,6 +12,7 @@ export type CommandId =
   | 'openModelSettings'
   | 'restartEngine'
   | 'refreshExplorer'
+  | 'goToResource'
   | 'exit'
   | 'undo'
   | 'redo'
@@ -81,8 +82,10 @@ export const MENUS: Menu[] = [
       command('showExplorer', 'Explorer', { key: '2' }),
       command('showActivity', 'Activity', { key: '3' }),
       separator,
-      command('toggleSidebar', 'Toggle Sidebar', { key: 'b' }),
+      command('goToResource', 'Go to Resource...', { key: 'p' }),
       command('refreshExplorer', 'Refresh Explorer'),
+      separator,
+      command('toggleSidebar', 'Toggle Sidebar', { key: 'b' }),
     ],
   },
 ];
