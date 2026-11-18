@@ -27,7 +27,7 @@ What has and has not been run:
 - The Copilot backend has been run for real, against GitHub Copilot CLI 1.0.113 with a signed-in account. Its protocol handling is also tested against a scripted agent.
 - The explorer, completion, history, export through the save dialog, the activity filters, the theme choice and the query library were each driven in the built app on Windows. The "Copy as CLI" commands were run in Windows PowerShell 5.1 and PowerShell 7 against the real engine. The POSIX form was checked in a shell under WSL with a stand-in program, not on macOS.
 - The Help menu's links have not been opened by a test. The address each one opens is tested.
-- One host test is sensitive to load. `dropping_the_handle_ends_the_child` in `engine/supervisor.rs` looks for the child with `tasklist` every 50 ms for 5 seconds, and on a busy machine `tasklist` itself can use that time up. It failed about one run in five while other builds were running, with the supervisor unchanged, and passes when run again.
+- The supervisor's tests see a child end by waiting on a handle to it on Windows, and with `kill -0` on Unix. They used to ask `tasklist`, which on a busy machine could use up the time a test allowed. They passed 30 runs in a row with every core busy. With twice as many busy loops as cores a different test, `an_unexpected_exit_is_reported_with_its_code`, missed its 10 second limit twice in 30 runs.
 
 Update this section when a milestone lands. The roadmap is in `README.md`.
 

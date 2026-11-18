@@ -276,16 +276,61 @@ mod tests {
         }
     }
 
-    fn pid_alive(pid: u32) -> bool {
-        if cfg!(windows) {
-            let out = std::process::Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
-                .output()
-                .unwrap();
-            String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))
-        } else {
+    /// A process a test watches for its end.
+    ///
+    /// On Windows this holds a handle to the process and waits on it. Asking
+    /// `tasklist` instead starts a program for every look, and on a busy
+    /// machine that alone could use up the time a test allows. The handle
+    /// also keeps the process id from going to another process meanwhile.
+    struct Watched {
+        #[cfg(windows)]
+        handle: windows_sys::Win32::Foundation::HANDLE,
+        #[cfg(not(windows))]
+        pid: u32,
+    }
+
+    #[cfg(windows)]
+    impl Watched {
+        /// Starts watching. `None` when no process has this id.
+        fn open(pid: u32) -> Option<Self> {
+            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+            // SAFETY: the arguments are plain values, and the handle that
+            // comes back is checked before it is kept.
+            let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+            (!handle.is_null()).then_some(Self { handle })
+        }
+
+        fn alive(&self) -> bool {
+            use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+            use windows_sys::Win32::System::Threading::WaitForSingleObject;
+            // SAFETY: the handle stays open for as long as `self` lives. A
+            // wait of zero milliseconds reports the state and returns.
+            let state = unsafe { WaitForSingleObject(self.handle, 0) };
+            // A process handle is signalled once the process has ended. A
+            // wait that fails counts as alive, so it can only fail a test.
+            state != WAIT_OBJECT_0
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for Watched {
+        fn drop(&mut self) {
+            // SAFETY: the handle came from OpenProcess and is closed once.
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
+        }
+    }
+
+    #[cfg(not(windows))]
+    impl Watched {
+        /// Starts watching. `None` when no process has this id.
+        fn open(pid: u32) -> Option<Self> {
+            let watched = Self { pid };
+            watched.alive().then_some(watched)
+        }
+
+        fn alive(&self) -> bool {
             std::process::Command::new("/bin/kill")
-                .args(["-0", &pid.to_string()])
+                .args(["-0", &self.pid.to_string()])
                 .stderr(Stdio::null())
                 .status()
                 .unwrap()
@@ -293,23 +338,29 @@ mod tests {
         }
     }
 
-    async fn gone_within(pid: u32, within: Duration) -> bool {
-        let deadline = Instant::now() + within;
-        while Instant::now() < deadline {
-            if !pid_alive(pid) {
-                return true;
+    impl Watched {
+        /// Whether the process ends within the time given.
+        async fn gone_within(&self, within: Duration) -> bool {
+            let deadline = Instant::now() + within;
+            loop {
+                if !self.alive() {
+                    return true;
+                }
+                if Instant::now() >= deadline {
+                    return false;
+                }
+                // Sleeping here lets the task that ends the child run.
+                tokio::time::sleep(Duration::from_millis(20)).await;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        false
     }
 
     #[tokio::test]
     async fn stop_ends_the_child() {
         let supervisor = Supervisor::new().unwrap();
         let mut child = supervisor.spawn(&sleeper()).unwrap();
-        let pid = child.pid.unwrap();
-        assert!(pid_alive(pid));
+        let watched = Watched::open(child.pid.unwrap()).expect("the child should be running");
+        assert!(watched.alive());
 
         child.stop().await;
 
@@ -320,16 +371,16 @@ mod tests {
                 requested: true
             })
         );
-        assert!(gone_within(pid, Duration::from_secs(5)).await);
+        assert!(watched.gone_within(Duration::from_secs(5)).await);
     }
 
     #[tokio::test]
     async fn dropping_the_handle_ends_the_child() {
         let supervisor = Supervisor::new().unwrap();
         let child = supervisor.spawn(&sleeper()).unwrap();
-        let pid = child.pid.unwrap();
+        let watched = Watched::open(child.pid.unwrap()).expect("the child should be running");
         drop(child);
-        assert!(gone_within(pid, Duration::from_secs(5)).await);
+        assert!(watched.gone_within(Duration::from_secs(5)).await);
     }
 
     #[tokio::test]
@@ -481,13 +532,14 @@ mod tests {
         })
         .await
         .expect("helper did not report a child pid");
-        assert!(pid_alive(child_pid), "supervised child should be running");
+        let watched = Watched::open(child_pid).expect("supervised child should be running");
+        assert!(watched.alive(), "supervised child should be running");
 
         // TerminateProcess on Windows, SIGKILL on Unix. No cleanup code runs.
         app.kill().await.unwrap();
 
         assert!(
-            gone_within(child_pid, Duration::from_secs(10)).await,
+            watched.gone_within(Duration::from_secs(10)).await,
             "supervised child {child_pid} outlived the app"
         );
     }

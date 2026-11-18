@@ -65,6 +65,10 @@ windows-sys = { version = "0.61", features = [
 ] }
 windows-native-keyring-store = "1"
 
+[target.'cfg(windows)'.dev-dependencies]
+# The supervisor's tests open a handle to a child and wait on it to see it end.
+windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
 
