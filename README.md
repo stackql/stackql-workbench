@@ -2,7 +2,7 @@
 
 Desktop query IDE and chat interface for [StackQL](https://github.com/stackql/stackql), for Windows and macOS.
 
-Status: pre-alpha. The query IDE foundations (M0) and the core of chat (M3) work on Windows. Nothing here is released yet, and nothing has been run on macOS.
+Status: pre-alpha. The query IDE foundations (M0), the core of chat (M3) and chat through the GitHub Copilot CLI work on Windows. Nothing here is released yet, and nothing has been run on macOS.
 
 ## Overview
 
@@ -13,7 +13,7 @@ The planned capabilities are listed below.
 - Provider explorer: a lazy tree of providers, services, resources, methods and fields
 - Query editor: tabs, StackQL-aware completion, saved `.iql` files
 - Results grid: virtualised rows, JSON cell viewer, export
-- Chat: available when an inference backend is configured, hidden otherwise
+- Chat: the view the app opens in. It needs a model backend, and asks for one the first time a message is sent
 - Approvals and activity: mutations proposed by a model wait for the operator, and every agent action is logged
 - Settings: engine path, credentials profile, safety mode, inference backend
 
@@ -133,6 +133,8 @@ flowchart LR
     iface --> acp["Delegated<br/>ACP agent on this machine"]
 ```
 
+The delegated backend that exists today is the GitHub Copilot CLI. It runs with the sign-in the CLI already has, which the app never sees, and it is given the engine's tools and nothing else. It cannot pass the engine's approval prompt on, so with it a statement that needs approval is refused instead of asked about. The findings behind this are in [docs/spike-acp.md](docs/spike-acp.md).
+
 The backends differ in how the operator signs in and in who runs the agent loop.
 
 | Backend | Sign-in | Agent loop | MCP client |
@@ -201,7 +203,14 @@ The engine keeps its provider cache in a folder of the app's own: `.stackql` bes
 
 Provider credentials are environment variables the engine reads. On Windows the engine sees the variables of your user account. To use a dotenv file, set it under Settings.
 
-Chat is optional. Choose a backend under Settings and paste an API key, which goes to the operating system keychain. Without a backend the chat pane is hidden and the rest works as before.
+The app opens in chat. The side menu leads to the explorer, which holds the provider tree, the query editor and the results grid, and to the activity list. The File, Edit and View menus repeat those.
+
+Chat needs a model backend. The first time you send a message without one, the model backend settings open. There are two kinds.
+
+- GitHub Copilot: uses the Copilot CLI installed on this machine and the sign-in it already has. Install the CLI, run `copilot login` once, then choose GitHub Copilot. Requests count against your Copilot plan, and the settings list each model with what it costs.
+- An API key for Gemini, Anthropic, or an OpenAI-compatible server, which covers local inference. The key goes to the operating system keychain.
+
+Without a backend the explorer and the query editor work as before.
 
 ## Repository layout
 
@@ -213,14 +222,14 @@ stackql-workbench/
     host/               typed wrappers over IPC
     lib/                pure logic with tests
     state/              hooks that connect the host to the panes
-    panes/              explorer, editor, results, chat, activity, settings, statusbar
+    panes/              shell, chat, explorer, editor, results, activity, settings, statusbar
     ui/                 small shared components
   src-tauri/            host (Rust)
     src/
       engine/           discovery, supervisor, process lifecycle
       connection/       Connection trait, LocalConnection
       query/            pg wire client, statement splitting, results
-      agent/            MCP client, approvals, InferenceBackend trait, backends, loop
+      agent/            MCP client, approvals, backends, loop, ACP client, delegated agent
       secrets/          keychain access
       activity/         operator history and the engine audit log
       icons/            provider icons
@@ -231,11 +240,11 @@ stackql-workbench/
   docs/                 design notes and spike reports
 ```
 
-What the engine actually does on each channel is recorded in [docs/spike-pgwire.md](docs/spike-pgwire.md) and [docs/spike-mcp.md](docs/spike-mcp.md).
+What the engine actually does on each channel is recorded in [docs/spike-pgwire.md](docs/spike-pgwire.md) and [docs/spike-mcp.md](docs/spike-mcp.md). What the Copilot CLI does as a delegated agent is in [docs/spike-acp.md](docs/spike-acp.md).
 
 ## Roadmap
 
-Milestones are delivered in order where they depend on each other. Each one leaves the app in a usable state. M0 is done, and the core of M3 was built ahead of M1 and M2 so that both the IDE and chat could be tried together.
+Milestones are delivered in order where they depend on each other. Each one leaves the app in a usable state. M0 is done, and the core of M3 was built ahead of M1 and M2 so that both the IDE and chat could be tried together. The first delegated agent from M5, the GitHub Copilot CLI, is also in.
 
 | Milestone | Scope |
 |---|---|

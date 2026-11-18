@@ -14,7 +14,10 @@ use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use tokio::sync::{Notify, watch};
 
-use super::{AgentChannel, Connection, EngineState, EngineStatus, EventSink, SafetyMode};
+use super::{
+    AgentChannel, Connection, DelegateBuilder, EngineState, EngineStatus, EventSink,
+    McpServerCommand, SafetyMode,
+};
 use crate::config::SettingsStore;
 use crate::engine::approot::{self, Defaults as ApprootDefaults};
 use crate::engine::discovery::{self, Inputs, Resolved};
@@ -170,6 +173,63 @@ impl LocalConnection {
         args.push("--mcp.config".into());
         args.push(config.to_string().into());
         args
+    }
+
+    /// How the engine's MCP server is started in a safety mode, from the
+    /// same binary and on the same data folder as the running engine.
+    fn mcp_server_command(&self, mode: SafetyMode) -> HostResult<McpServerCommand> {
+        let launch = lock(&self.shared.launch)
+            .clone()
+            .ok_or(HostError::EngineNotRunning)?;
+        std::fs::create_dir_all(&self.audit_dir).map_err(|err| {
+            HostError::Agent(format!(
+                "Could not create the audit folder {}: {err}",
+                self.audit_dir.display()
+            ))
+        })?;
+        let settings = self.settings.get();
+        Ok(McpServerCommand {
+            args: self.mcp_args(mode, &launch.approot, settings.env_file.as_deref()),
+            program: launch.binary,
+            cwd: launch.approot,
+        })
+    }
+
+    /// Starts a supervised child that speaks a protocol over its stdio.
+    fn piped_child(
+        &self,
+        program: PathBuf,
+        args: Vec<OsString>,
+        cwd: PathBuf,
+    ) -> HostResult<AgentChannel> {
+        let spec = ChildSpec {
+            program,
+            args,
+            // Same environment policy as the operator's engine. The model
+            // never sees any of it: tool results are all it receives.
+            env: EnvSpec {
+                inherit: true,
+                vars: Vec::new(),
+            },
+            cwd,
+            stdio: StdioMode::Piped,
+        };
+        let mut child = self
+            .supervisor
+            .spawn(&spec)
+            .map_err(|err| HostError::Agent(err.to_string()))?;
+        let (Some(reader), Some(writer)) = (child.stdout.take(), child.stdin.take()) else {
+            return Err(HostError::Agent(format!(
+                "{} started without stdio pipes.",
+                spec.program.display()
+            )));
+        };
+        Ok(AgentChannel {
+            reader: Box::new(reader),
+            writer: Box::new(writer),
+            diagnostics: child.stderr.clone(),
+            keepalive: Box::new(child),
+        })
     }
 
     async fn stop_engine(&self, child: &mut Option<ManagedChild>) {
@@ -542,44 +602,21 @@ impl Connection for LocalConnection {
 
     fn open_agent_channel(&self, mode: SafetyMode) -> BoxFuture<'_, HostResult<AgentChannel>> {
         async move {
-            let launch = lock(&self.shared.launch)
-                .clone()
-                .ok_or(HostError::EngineNotRunning)?;
-            std::fs::create_dir_all(&self.audit_dir).map_err(|err| {
-                HostError::Agent(format!(
-                    "Could not create the audit folder {}: {err}",
-                    self.audit_dir.display()
-                ))
-            })?;
-            let settings = self.settings.get();
-            let spec = ChildSpec {
-                program: launch.binary.clone(),
-                args: self.mcp_args(mode, &launch.approot, settings.env_file.as_deref()),
-                // Same environment policy as the operator's engine. The model
-                // never sees any of it: tool results are all it receives.
-                env: EnvSpec {
-                    inherit: true,
-                    vars: Vec::new(),
-                },
-                cwd: launch.approot.clone(),
-                // stdout and stdin carry protocol frames and nothing else.
-                stdio: StdioMode::Piped,
-            };
-            let mut child = self
-                .supervisor
-                .spawn(&spec)
-                .map_err(|err| HostError::Agent(err.to_string()))?;
-            let (Some(reader), Some(writer)) = (child.stdout.take(), child.stdin.take()) else {
-                return Err(HostError::Agent(
-                    "The engine's MCP server started without stdio pipes.".to_string(),
-                ));
-            };
-            Ok(AgentChannel {
-                reader: Box::new(reader),
-                writer: Box::new(writer),
-                diagnostics: child.stderr.clone(),
-                keepalive: Box::new(child),
-            })
+            let server = self.mcp_server_command(mode)?;
+            // stdout and stdin carry protocol frames and nothing else.
+            self.piped_child(server.program, server.args, server.cwd)
+        }
+        .boxed()
+    }
+
+    fn open_delegate_channel<'a>(
+        &'a self,
+        mode: SafetyMode,
+        build: DelegateBuilder<'a>,
+    ) -> BoxFuture<'a, HostResult<AgentChannel>> {
+        async move {
+            let command = build(self.mcp_server_command(mode)?)?;
+            self.piped_child(command.program, command.args, command.cwd)
         }
         .boxed()
     }

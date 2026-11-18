@@ -129,22 +129,41 @@ pub enum BackendKind {
     /// OpenAI's Chat Completions API, and any server that implements it,
     /// which covers local inference.
     OpenaiCompatible,
+    /// The GitHub Copilot CLI, driven as a delegated agent. It runs the
+    /// model with the operator's own sign-in, which this app never sees.
+    GithubCopilot,
 }
 
 impl BackendKind {
-    /// The name the API key is stored under in the OS keychain.
-    pub fn secret_name(self) -> &'static str {
+    /// Every backend, in the order the settings pane lists them.
+    pub const ALL: [Self; 4] = [
+        Self::Gemini,
+        Self::Anthropic,
+        Self::OpenaiCompatible,
+        Self::GithubCopilot,
+    ];
+
+    /// The name the API key is stored under in the OS keychain. `None` for
+    /// a backend that has no key of ours to store.
+    pub fn secret_name(self) -> Option<&'static str> {
         match self {
-            Self::Gemini => "inference.gemini.api_key",
-            Self::Anthropic => "inference.anthropic.api_key",
-            Self::OpenaiCompatible => "inference.openai_compatible.api_key",
+            Self::Gemini => Some("inference.gemini.api_key"),
+            Self::Anthropic => Some("inference.anthropic.api_key"),
+            Self::OpenaiCompatible => Some("inference.openai_compatible.api_key"),
+            Self::GithubCopilot => None,
         }
     }
 
     /// Whether the backend can work without an API key. A local server
-    /// usually has none.
+    /// usually has none, and a delegated agent signs in by itself.
     pub fn key_optional(self) -> bool {
-        matches!(self, Self::OpenaiCompatible)
+        matches!(self, Self::OpenaiCompatible | Self::GithubCopilot)
+    }
+
+    /// Whether an agent the operator installed runs the model and the
+    /// tools, instead of the host's own loop.
+    pub fn is_delegated(self) -> bool {
+        matches!(self, Self::GithubCopilot)
     }
 }
 
@@ -237,7 +256,28 @@ mod tests {
             names.iter().collect::<std::collections::HashSet<_>>().len(),
             3
         );
+        assert!(names.iter().all(Option::is_some));
         assert!(BackendKind::OpenaiCompatible.key_optional());
         assert!(!BackendKind::Gemini.key_optional());
+    }
+
+    #[test]
+    fn a_delegated_agent_has_no_key_of_ours() {
+        let kind = BackendKind::GithubCopilot;
+        assert!(kind.is_delegated());
+        assert_eq!(kind.secret_name(), None);
+        assert!(kind.key_optional());
+        assert_eq!(
+            serde_json::to_value(kind).unwrap(),
+            serde_json::json!("github_copilot")
+        );
+        for other in [
+            BackendKind::Gemini,
+            BackendKind::Anthropic,
+            BackendKind::OpenaiCompatible,
+        ] {
+            assert!(!other.is_delegated());
+        }
+        assert_eq!(BackendKind::ALL.len(), 4);
     }
 }

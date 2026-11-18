@@ -8,18 +8,21 @@ StackQL Workbench is the desktop UI for [StackQL](https://github.com/stackql/sta
 
 ## Status
 
-Pre-alpha. Two milestones have landed on Windows.
+Pre-alpha. This much has landed on Windows.
 
 - M0, foundations: engine discovery and supervision, the pg wire query service, the explorer, one editor buffer and the results grid.
 - The core of M3, chat: the MCP client with approvals, the agent loop, the activity pane, and API key backends for Gemini, Anthropic and OpenAI-compatible servers. Anthropic and OpenAI-compatible were M4 items and came along because the backend interface made them cheap.
+- The first delegated agent, an M5 item: the GitHub Copilot CLI, driven over the Agent Client Protocol. It uses the sign-in the CLI already has.
+- A chat-first layout: chat is the view the app opens in, with a side menu for the explorer and activity, and File, Edit and View menus.
 
-Not started: M1 (tabs, completion, saved files, export), M2 (packaging), plan sign-in and delegated agents. Replies are not streamed yet.
+Not started: M1 (tabs, completion, saved files, export), M2 (packaging), plan sign-in and any delegated agent other than the Copilot CLI. Replies from the API key backends are not streamed yet. Replies from the Copilot CLI are.
 
 What has and has not been run:
 
 - Everything has been run on Windows 11 x64 against `stackql` v1.0.888.
 - Nothing has been run on macOS. The process supervision code for Unix is tested on Linux. The rest of the macOS-only code, the keychain store among it, has only been written.
-- No backend has been run against a real inference provider. Each is tested against a local stub that checks what goes on the wire, and the loop is tested against a real `stackql mcp` with a scripted model.
+- No API key backend has been run against a real inference provider. Each is tested against a local stub that checks what goes on the wire, and the loop is tested against a real `stackql mcp` with a scripted model.
+- The Copilot backend has been run for real, against GitHub Copilot CLI 1.0.113 with a signed-in account. Its protocol handling is also tested against a scripted agent.
 
 Update this section when a milestone lands. The roadmap is in `README.md`.
 
@@ -35,7 +38,8 @@ These rules are fixed. If one cannot be met, stop and ask instead of working aro
   - Agent channel: `stackql mcp` over stdio. Used only by the agent runtime. Statements here originate from a model.
 - The engine enforces safety. Do not build a second SQL classifier or approval gate in the host. Pass the workspace safety mode to the MCP server and implement the client side of its approval flow.
 - All engine access sits behind a `Connection` interface. Only `LocalConnection` exists for now. Code above that interface must not assume the engine is a child process, because a remote connection comes later.
-- All inference sits behind an `InferenceBackend` interface. The chat UI works unchanged across backends. With no backend configured the chat pane is hidden and the IDE is fully usable.
+- Inference sits behind one of two seams. A model API sits behind the `InferenceBackend` interface, and the host runs the loop. An agent the operator installed sits behind the ACP client in `agent/acp.rs`, and the agent runs the loop. The chat UI works unchanged across both.
+- Chat is the default view. With no backend configured, sending a message opens the model backend settings and keeps what was typed. The explorer and the editor are fully usable without a backend.
 - SQL is the interchange between the agent and the operator. Agent-proposed statements are shown as SQL, can be opened in an editor tab, and every executed statement from either channel is recorded in history.
 - No Deno, no HTTP middleware tier, no Next.js. The earlier `stackql-playground` and `stackql-middleware` prototypes are reference material for layout and API shape only.
 
@@ -60,6 +64,8 @@ These are the chosen defaults. Check the current stable version and API of each 
 | Process supervision | `windows-sys` job object on Windows, process group plus a pipe watchdog on Unix |
 | Clipboard | `arboard`, write only, through a host command |
 | HTTPS client | `reqwest` with the OS TLS stack (`native-tls`) |
+| ACP client | Written in this repository: JSON-RPC over stdio, protocol version 1, the client side only |
+| Markdown in replies | Written in this repository: a small reader that builds a tree, never HTML |
 
 The MCP client library must support the client side of elicitation and protocol revision negotiation. `rmcp` 3.11 does both. That was confirmed against the real engine and is recorded in `docs/spike-mcp.md`.
 
@@ -80,16 +86,16 @@ The layout is below. Keep it current as the code lands.
 stackql-workbench/
   src/                  webview (React)
     host/               typed wrappers over IPC, the only Tauri imports
-    lib/                pure logic with tests: results, cells, explorer tree, chat, activity
+    lib/                pure logic with tests: results, cells, explorer tree, chat, activity, menu, markdown
     state/              hooks that connect the host to the panes
-    panes/              explorer, editor, results, chat, activity, settings, statusbar
+    panes/              shell (menu bar, side menu), chat, explorer, editor, results, activity, settings, statusbar
     ui/                 small shared components
   src-tauri/            host (Rust)
     src/
       engine/           discovery, data folder, port selection, supervisor, job object, watchdog
       connection/       Connection trait, LocalConnection, safety mode, agent channel
       query/            pg wire session, statement splitting, results, explorer statements
-      agent/            MCP client, approvals, InferenceBackend trait, backends, loop
+      agent/            MCP client, approvals, InferenceBackend trait, backends, loop, ACP client, delegated agent
       secrets/          keychain access
       activity/         operator history, engine audit log reader
       icons/            provider icon lookup, fetch and cache
@@ -164,6 +170,7 @@ The two explicit sources are strict. If the settings path or `STACKQL_BIN` is se
 One supervisor owns every child process.
 
 - Children must not outlive the app, including after a crash or force quit. Use a job object on Windows, created with kill-on-close. On macOS a process group is not enough on its own, because nothing signals the group when the app receives SIGKILL. Each child therefore also gets a watchdog: `/bin/sh` blocked on a pipe that only the app holds open, which signals the group when the pipe closes.
+- On Windows a child can start out in a job of its own. A packaged app does, and a program on `PATH` can be an alias for one. Such a process cannot join a job that already has members, so it gets a kill-on-close job to itself. An empty job always takes it.
 - The watchdog script must stay POSIX. `kill -s TERM -- -PGID` works in every `/bin/sh` tried. `kill -TERM -- -PGID` does not.
 - Start console children with `CREATE_NO_WINDOW` on Windows, otherwise a console window flashes up.
 - Wait for readiness with a timeout. Surface failures in the UI with the captured stderr.
@@ -229,6 +236,7 @@ How the host uses it:
 
 - The connection supplies the two byte streams. The agent runtime never spawns the process itself, and the supervisor owns it like any other child.
 - One session is kept per safety mode. Changing the mode opens a new session, because the mode is fixed when the server starts.
+- For a delegated agent the connection starts the agent instead, and tells it how to start the MCP server in the workspace safety mode. The agent is then the MCP client. See Inference.
 
 The workspace safety setting maps directly onto `server.mode`.
 
@@ -259,9 +267,9 @@ Backends are built in this order.
 
 1. API key. Gemini first because it works on the free tier, then Anthropic, OpenAI and any OpenAI-compatible base URL, which covers local inference. The host runs the loop and owns the MCP client.
 2. ChatGPT plan sign-in through OpenAI's Sign in with ChatGPT programme. This needs a client ID issued to this project. Do not start it until the maintainer confirms the client ID exists.
-3. Delegated. An ACP agent that the operator has installed and signed in to themselves, for example Claude Code through its ACP adapter. In this mode the agent is the MCP client and spawns its own `stackql mcp`. Start that process in `read_only` until the agent's elicitation handling is verified.
+3. Delegated. An ACP agent that the operator has installed and signed in to themselves. In this mode the agent is the MCP client and spawns its own `stackql mcp`. Each agent needs its own launcher, because how the engine's MCP server is handed over and how tools are restricted differs from one agent to the next. Verify an agent's elicitation handling before building on it, and record it in `docs/`.
 
-What exists now, all of it under item 1:
+What exists now under item 1:
 
 | Backend | API | Default model | Notes |
 |---|---|---|---|
@@ -277,6 +285,16 @@ How they are built:
 - Replies are not streamed. A turn shows progress per tool call.
 - The API key is read from the keychain when a turn starts. Settings hold the backend, the model and the address, never the key.
 
+What exists now under item 3 is the GitHub Copilot CLI. Every point was tested. See `docs/spike-acp.md`.
+
+- The host starts `copilot --acp` under the supervisor and speaks ACP version 1 to it over stdio.
+- The engine's MCP server is named in a file passed with `--additional-mcp-config`, under the name `stackql`. The CLI rejects a stdio MCP server passed in `session/new`, and then silently uses the operator's own Copilot configuration, so that route must not be used.
+- `--available-tools` lists the engine's tools, read from the engine at start. The model then has no shell, no file access and no other MCP server. `--allow-tool=stackql` stops the CLI asking about each engine tool call.
+- The workspace safety mode is passed to the engine as for the other backends. The CLI does not relay MCP elicitation, so the engine refuses a statement that needs approval instead of asking. It fails closed. Do not put a gate of the host's own in its place.
+- A `session/request_permission` from the agent is declined and the operator is told. None is expected, and one means the agent is reaching for something outside the engine.
+- The model is chosen with `session/set_config_option`. Empty leaves the CLI's own choice. The settings pane lists the models with what each costs against the operator's plan.
+- The engine's stderr goes to the CLI, so the note about a failed provider call is missing on this path.
+
 These rules hold for every backend.
 
 - Never reuse, read or proxy another product's OAuth credentials or client IDs. That includes Claude Code, Gemini CLI and Codex. Never add a vendor login button without a client ID issued to this project for that purpose.
@@ -291,7 +309,12 @@ A few fixed points for the interface.
 - The app icon is StackQL's own favicon. The files in `src-tauri/icons/` were generated with `npx tauri icon` from `static/android-chrome-512x512.png` in the `stackql/stackql.io` repository, which is the same mark as its `favicon.ico` at a usable resolution.
 - Provider nodes in the explorer show the provider's own icon. The host resolves it through the provider dictionary published at `src/configs/providers.json` in `stackql/stackql.io`, fetches the icon from `stackql.io`, caches it in the app cache directory and passes it to the webview as a `data:` URL. A provider with no entry, or whose icon cannot be fetched, shows the letter badge. Providers built into the engine, such as `stackql_preview`, show the StackQL icon, which is compiled in. The webview itself still makes no network calls. A snapshot of the dictionary is compiled in as a fallback.
 - Saved queries are plain `.iql` files on disk, not an app database.
-- Pane set: explorer tree, editor tabs, results grid, chat, activity, settings.
+- Layout: a menu bar with File, Edit and View, a side menu, one main view at a time, and the status bar. The views are chat, the explorer with the editor and results, and activity. Settings is a dialog. Chat is the view the app opens in.
+- The menus are drawn in the webview, not by the OS, so they are the same on both platforms and can be tested like the rest of the page. They repeat what the side menu and the panes offer.
+- Every view stays mounted while another is shown, so the editor keeps its text and history and a running turn keeps its place.
+- Row results from the assistant are shown in the conversation, first rows only, with a way to open the full result in the grid.
+- Replies are read as markdown by a small reader in `src/lib/markdown.ts` that builds a tree. Model output is never turned into HTML. Links are shown and never opened.
+- Under a method the explorer groups fields into Inputs and Outputs, both collapsed until opened.
 - Nested JSON is common in results. The grid needs a cell viewer for it.
 
 ## Conventions
@@ -326,7 +349,12 @@ Raise these with the maintainer when the work reaches them. Do not decide them a
 - Whether `srv` should later co-host the MCP server so the IDE and the agent share one engine session.
 - Whether loopback pg wire needs TLS with a per-launch client certificate.
 
-These came out of the two spikes and need an answer from the engine side.
+These came out of the Copilot work.
+
+- Whether the Copilot CLI will relay MCP elicitation to an ACP client. Until it does there is no approval card on that path.
+- Whether macOS should get a native menu bar in place of, or as well as, the one drawn in the webview.
+
+These came out of the two engine spikes and need an answer from the engine side.
 
 - `srv` has no cancel. It needs to send `BackendKeyData` and handle a cancel request before M1 can offer more than "stop waiting".
 - `srv` runs only the first statement in a message, and cuts at a semicolon inside a string literal.

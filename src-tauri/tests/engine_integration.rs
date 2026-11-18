@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use stackql_workbench_lib::config::{Settings, SettingsStore};
 use stackql_workbench_lib::connection::local::LocalConnection;
-use stackql_workbench_lib::connection::{Connection, EngineState, EventSink};
+use stackql_workbench_lib::connection::{
+    Connection, DelegateCommand, EngineState, EventSink, McpServerCommand, SafetyMode,
+};
 use stackql_workbench_lib::engine::approot::Defaults as ApprootDefaults;
 use stackql_workbench_lib::engine::discovery::{self, Inputs};
 use stackql_workbench_lib::error::HostError;
@@ -413,6 +415,92 @@ async fn a_data_folder_that_cannot_be_used_is_reported_in_the_status() {
         "a folder named in settings is never replaced by a default"
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn a_delegate_is_told_how_the_mcp_server_starts_and_gets_piped_stdio() {
+    if !engine_available() {
+        return;
+    }
+    let (connection, approot) = started("delegate").await;
+    let binary = PathBuf::from(connection.status().location.unwrap());
+
+    let seen: Arc<Mutex<Option<McpServerCommand>>> = Arc::default();
+    let sink = seen.clone();
+    // Any program that writes to stdout stands in for an agent here.
+    let program = binary.clone();
+    let cwd = approot.clone();
+    let mut channel = connection
+        .open_delegate_channel(
+            SafetyMode::ReadOnly,
+            Box::new(move |server| {
+                *sink.lock().unwrap() = Some(server);
+                Ok(DelegateCommand {
+                    program,
+                    args: vec!["--version".into()],
+                    cwd,
+                })
+            }),
+        )
+        .await
+        .unwrap();
+
+    // The builder was told to start the same binary, on the same data
+    // folder, over stdio, in the mode that was asked for.
+    let server = seen.lock().unwrap().clone().unwrap();
+    assert_eq!(server.program, binary);
+    assert_eq!(server.cwd, approot);
+    let args: Vec<String> = server
+        .args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let after = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
+    assert_eq!(args[0], "mcp");
+    assert!(args.contains(&"--mcp.server.type=stdio".to_string()));
+    assert_eq!(after("--approot"), approot.to_string_lossy());
+    let config: serde_json::Value = serde_json::from_str(&after("--mcp.config")).unwrap();
+    assert_eq!(config["server"]["mode"], "read_only");
+    assert_eq!(config["server"]["transport"], "stdio");
+
+    // What the program writes arrives on the channel.
+    let mut text = String::new();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::io::AsyncReadExt::read_to_string(&mut channel.reader, &mut text),
+    )
+    .await
+    .expect("the program did not finish")
+    .unwrap();
+    assert!(text.starts_with("stackql"), "unexpected output {text:?}");
+
+    drop(channel);
+    finish(connection, approot).await;
+}
+
+#[tokio::test]
+async fn a_delegate_cannot_start_without_an_engine() {
+    let approot = scratch_approot("nodelegate");
+    let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
+    let connection = LocalConnection::new(
+        ApprootDefaults::fixed(approot.clone()),
+        approot.join("audit"),
+        settings,
+    )
+    .unwrap();
+    let asked = Arc::new(Mutex::new(false));
+    let flag = asked.clone();
+    let outcome = connection
+        .open_delegate_channel(
+            SafetyMode::Safe,
+            Box::new(move |_| {
+                *flag.lock().unwrap() = true;
+                Err(HostError::Agent("not reached".into()))
+            }),
+        )
+        .await;
+    assert!(matches!(outcome, Err(HostError::EngineNotRunning)));
+    assert!(!*asked.lock().unwrap(), "nothing may be started");
 }
 
 #[tokio::test]

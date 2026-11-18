@@ -8,6 +8,8 @@
 pub mod local;
 
 use std::any::Any;
+use std::ffi::OsString;
+use std::path::PathBuf;
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -59,6 +61,29 @@ pub struct AgentChannel {
     /// Keeps the channel open. Dropping it tears the channel down.
     pub keepalive: Box<dyn Any + Send + Sync>,
 }
+
+/// How a program that is its own MCP client starts the engine's MCP
+/// server, already set to a safety mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpServerCommand {
+    pub program: PathBuf,
+    pub args: Vec<OsString>,
+    pub cwd: PathBuf,
+}
+
+/// A program on this machine to run for the agent runtime: an agent the
+/// operator installed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegateCommand {
+    pub program: PathBuf,
+    pub args: Vec<OsString>,
+    pub cwd: PathBuf,
+}
+
+/// Turns the way the engine's MCP server is started into the command line
+/// of an agent that will start it.
+pub type DelegateBuilder<'a> =
+    Box<dyn FnOnce(McpServerCommand) -> HostResult<DelegateCommand> + Send + 'a>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,6 +186,20 @@ pub trait Connection: Send + Sync + 'static {
     /// safety mode. Statements sent here originate from a model, so this is
     /// kept apart from the operator's channel on purpose.
     fn open_agent_channel(&self, mode: SafetyMode) -> BoxFuture<'_, HostResult<AgentChannel>>;
+
+    /// Starts an agent the operator installed, which is its own MCP client,
+    /// and returns the streams of its protocol. `build` is told how the
+    /// engine's MCP server is started in the given safety mode and answers
+    /// with the agent's command line.
+    ///
+    /// The agent is supervised like any other child. It is still the agent
+    /// channel: what reaches the engine this way originates from a model,
+    /// and the engine applies the safety mode to it.
+    fn open_delegate_channel<'a>(
+        &'a self,
+        mode: SafetyMode,
+        build: DelegateBuilder<'a>,
+    ) -> BoxFuture<'a, HostResult<AgentChannel>>;
 
     /// The directory the engine writes its agent audit log to, if it keeps
     /// one where the host can read it.

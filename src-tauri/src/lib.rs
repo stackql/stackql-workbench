@@ -76,7 +76,10 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     app.manage(AppState {
-        agent: Arc::new(AgentRuntime::new(connection.clone())),
+        agent: Arc::new(
+            AgentRuntime::new(connection.clone())
+                .with_delegate_dir(data_dir.join("agents").join("copilot")),
+        ),
         connection,
         settings,
         icons: Arc::new(ProviderIcons::new(cache_dir.join("provider-icons"))),
@@ -114,6 +117,7 @@ pub fn run() {
             ipc::agent_approve,
             ipc::agent_stop,
             ipc::agent_reset,
+            ipc::agent_delegate_info,
             ipc::activity_list,
         ])
         .build(tauri::generate_context!());

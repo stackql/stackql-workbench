@@ -9,6 +9,7 @@
 //! the MCP server and relays its approval prompts to the operator. It makes
 //! no judgement of its own about any statement.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -16,12 +17,17 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Notify;
 
+use super::acp::PROTOCOL_VERSION as ACP_VERSION;
 use super::approvals::{ApprovalRequest, Approvals};
 use super::backend::{
     ChatRequest, InferenceBackend, Message, StopReason, ToolCall, ToolOutcome, Usage,
 };
+use super::copilot;
+use super::delegate::{DelegateSession, ModelOption};
 use super::mcp::{McpSession, ToolResult};
-use crate::connection::{Connection, SafetyMode};
+use crate::connection::{
+    Connection, DelegateBuilder, DelegateCommand, McpServerCommand, SafetyMode,
+};
 use crate::error::{HostError, HostResult};
 use crate::query::result::Row;
 use crate::util::{lock, truncate};
@@ -33,7 +39,7 @@ const MAX_STEPS: usize = 40;
 const MAX_MODEL_CHARS: usize = 60_000;
 /// Tool text beyond this is cut before it goes to the webview. The grid
 /// shows the rows, so the text is only a preview there.
-const MAX_UI_TEXT_CHARS: usize = 6_000;
+pub(super) const MAX_UI_TEXT_CHARS: usize = 6_000;
 /// Rows beyond this are not sent to the webview for one tool result.
 const MAX_UI_ROWS: usize = 5_000;
 
@@ -79,7 +85,24 @@ pub enum AgentEvent {
         protocol_version: String,
         tools: usize,
     },
+    /// A delegated agent was started for this turn. It is its own MCP
+    /// client, on the engine in the given mode.
+    DelegateStarted {
+        mode: SafetyMode,
+        /// The agent's name and version.
+        agent: String,
+        /// The model it will use, when it says.
+        model: Option<String>,
+        /// How many of the engine's tools it was given. It has no others.
+        tools: usize,
+    },
     AssistantText {
+        text: String,
+    },
+    /// A piece of the reply, as it is written. Pieces with the same id
+    /// belong to one message.
+    AssistantDelta {
+        id: String,
         text: String,
     },
     ToolCallStarted {
@@ -121,10 +144,38 @@ pub struct TurnSummary {
 
 pub type Emit = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
+/// How the operator set a delegated agent up.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DelegateRequest {
+    /// The model to ask the agent for. `None` leaves the agent's own choice.
+    pub model: Option<String>,
+    /// Where the agent's program is. `None` searches `PATH`.
+    pub program: Option<PathBuf>,
+}
+
+/// What a delegated agent says about itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegateInfo {
+    pub version: String,
+    pub current_model: Option<String>,
+    pub models: Vec<ModelOption>,
+}
+
+/// What a delegated session was started with. A change in any of it needs
+/// a new session, because the safety mode is fixed on the agent's command
+/// line.
+#[derive(PartialEq, Eq)]
+struct DelegateKey {
+    mode: SafetyMode,
+    request: DelegateRequest,
+}
+
 #[derive(Default)]
 struct State {
     session: Option<(SafetyMode, McpSession)>,
     messages: Vec<Message>,
+    delegate: Option<(DelegateKey, DelegateSession)>,
 }
 
 pub struct AgentRuntime {
@@ -132,6 +183,8 @@ pub struct AgentRuntime {
     approvals: Arc<Approvals>,
     state: tokio::sync::Mutex<State>,
     stop: Mutex<Option<Arc<Notify>>>,
+    /// Where a delegated agent's configuration and working folder go.
+    delegate_dir: Option<PathBuf>,
 }
 
 /// Undoes the per-turn wiring when a turn ends, however it ends.
@@ -155,7 +208,15 @@ impl AgentRuntime {
             approvals: Arc::new(Approvals::default()),
             state: tokio::sync::Mutex::new(State::default()),
             stop: Mutex::new(None),
+            delegate_dir: None,
         }
+    }
+
+    /// Sets the folder a delegated agent works in. Without it there are no
+    /// delegated agents.
+    pub fn with_delegate_dir(mut self, dir: PathBuf) -> Self {
+        self.delegate_dir = Some(dir);
+        self
     }
 
     pub fn approvals(&self) -> &Arc<Approvals> {
@@ -186,6 +247,149 @@ impl AgentRuntime {
         if let Some((_, session)) = state.session.take() {
             session.close().await;
         }
+        // Dropping the session ends the agent's process.
+        state.delegate = None;
+    }
+
+    /// Starts a delegated agent on the engine in the given mode. Returns
+    /// the session and the number of engine tools the agent was given.
+    async fn open_delegate(
+        &self,
+        request: &DelegateRequest,
+        mode: SafetyMode,
+    ) -> HostResult<(DelegateSession, usize)> {
+        let dir = self.delegate_dir.clone().ok_or_else(|| {
+            HostError::Agent("No folder for agent sessions is set up.".to_string())
+        })?;
+        let workspace = dir.join("workspace");
+        std::fs::create_dir_all(&workspace).map_err(|err| {
+            HostError::Agent(format!(
+                "Could not create the folder for agent sessions {}: {err}",
+                workspace.display()
+            ))
+        })?;
+        let program = copilot::find_program(
+            request.program.as_deref(),
+            std::env::var_os("PATH").as_deref(),
+            copilot::program_exists,
+        )
+        .map_err(HostError::Agent)?;
+
+        // The agent is given the engine's tools by name and no others. The
+        // names come from the engine, so a new tool in a later engine is
+        // not left out, and an old one is not asked for.
+        let channel = self
+            .connection
+            .open_agent_channel(SafetyMode::ReadOnly)
+            .await?;
+        let probe = McpSession::connect(channel, self.approvals.clone()).await?;
+        let tools: Vec<String> = probe.tools().iter().map(|tool| tool.name.clone()).collect();
+        probe.close().await;
+        let tool_ids = copilot::tool_ids(&tools);
+
+        let config_file = dir.join("mcp-config.json");
+        let cwd = workspace.clone();
+        let build: DelegateBuilder<'_> = Box::new(move |server: McpServerCommand| {
+            let config = copilot::mcp_config(&server).map_err(HostError::Agent)?;
+            let text = serde_json::to_string_pretty(&config)
+                .map_err(|err| HostError::Agent(err.to_string()))?;
+            // The file holds paths and the safety mode. No secret is in it.
+            std::fs::write(&config_file, text).map_err(|err| {
+                HostError::Agent(format!(
+                    "Could not write the agent's configuration {}: {err}",
+                    config_file.display()
+                ))
+            })?;
+            Ok(DelegateCommand {
+                program,
+                args: copilot::launch_args(&config_file, &tool_ids),
+                cwd,
+            })
+        });
+        let channel = self.connection.open_delegate_channel(mode, build).await?;
+        let session = DelegateSession::open(
+            channel,
+            copilot::PROFILE,
+            &workspace,
+            request.model.as_deref(),
+        )
+        .await?;
+        Ok((session, tools.len()))
+    }
+
+    /// Asks a delegated agent which models it offers. The session opened
+    /// for the question is closed again, and no prompt is sent.
+    pub async fn delegate_info(
+        &self,
+        request: DelegateRequest,
+        mode: SafetyMode,
+    ) -> HostResult<DelegateInfo> {
+        let (session, _) = self.open_delegate(&request, mode).await?;
+        Ok(DelegateInfo {
+            version: session.agent_version().to_string(),
+            current_model: session.current_model().map(str::to_string),
+            models: session.models().to_vec(),
+        })
+    }
+
+    /// Runs one turn through a delegated agent. The agent runs the model
+    /// and calls the engine's tools itself. The engine applies the safety
+    /// mode, and what it refuses stays refused: there is no approval prompt
+    /// on this path, because the agent does not pass one on.
+    pub async fn send_delegated(
+        &self,
+        request: DelegateRequest,
+        mode: SafetyMode,
+        text: String,
+        emit: Emit,
+    ) -> HostResult<TurnSummary> {
+        let mut state = self.state.try_lock().map_err(|_| {
+            HostError::Agent("The assistant is still working on the previous message.".to_string())
+        })?;
+        let stop = Arc::new(Notify::new());
+        *lock(&self.stop) = Some(stop.clone());
+        let _guard = TurnGuard { runtime: self };
+
+        let key = DelegateKey { mode, request };
+        let reusable = state
+            .delegate
+            .as_ref()
+            .is_some_and(|(current, session)| *current == key && !session.is_closed());
+        if !reusable {
+            let previous = state.delegate.take().map(|(old, _)| old.mode);
+            let (session, tools) = self.open_delegate(&key.request, mode).await?;
+            if let Some(old_mode) = previous {
+                let cause = if old_mode == mode {
+                    "The previous session ended"
+                } else {
+                    "The safety mode changed"
+                };
+                emit(AgentEvent::Notice {
+                    message: format!(
+                        "{cause}, so {} started a new session. It does not remember the earlier messages.",
+                        copilot::PROFILE.name
+                    ),
+                });
+            }
+            let version = session.agent_version();
+            emit(AgentEvent::DelegateStarted {
+                mode,
+                agent: format!("{} CLI {version}, ACP {ACP_VERSION}", copilot::PROFILE.name)
+                    .replace(" CLI ,", ","),
+                model: session.current_model().map(str::to_string),
+                tools,
+            });
+            state.delegate = Some((key, session));
+        }
+        let Some((_, session)) = state.delegate.as_mut() else {
+            return Err(HostError::Agent("No agent session.".to_string()));
+        };
+
+        let outcome = session.prompt(&text, &stop, &emit).await;
+        if session.is_closed() {
+            state.delegate = None;
+        }
+        outcome
     }
 
     /// Runs one turn: the operator's message, then model and tool steps
@@ -209,7 +413,9 @@ impl AgentRuntime {
         })));
         let _guard = TurnGuard { runtime: self };
 
-        let State { session, messages } = &mut *state;
+        let State {
+            session, messages, ..
+        } = &mut *state;
 
         // A session is tied to the safety mode it was started with.
         let reusable = session
@@ -643,6 +849,32 @@ mod tests {
                 "event": "sessionStarted",
                 "data": { "mode": "delete_safe", "protocolVersion": "2025-11-25", "tools": 15 }
             })
+        );
+        let event = AgentEvent::DelegateStarted {
+            mode: SafetyMode::Safe,
+            agent: "GitHub Copilot CLI 1.0.113, ACP 1".into(),
+            model: Some("claude-sonnet-5.5".into()),
+            tools: 15,
+        };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            json!({
+                "event": "delegateStarted",
+                "data": {
+                    "mode": "safe",
+                    "agent": "GitHub Copilot CLI 1.0.113, ACP 1",
+                    "model": "claude-sonnet-5.5",
+                    "tools": 15
+                }
+            })
+        );
+        let event = AgentEvent::AssistantDelta {
+            id: "m1".into(),
+            text: "Let me ".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            json!({ "event": "assistantDelta", "data": { "id": "m1", "text": "Let me " } })
         );
     }
 }

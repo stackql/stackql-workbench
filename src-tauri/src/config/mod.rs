@@ -25,6 +25,10 @@ pub struct InferenceSettings {
     /// Empty means the backend's default address.
     #[serde(default)]
     pub base_url: Option<String>,
+    /// For a delegated agent: where its program is. Empty means search
+    /// `PATH`.
+    #[serde(default)]
+    pub program: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +60,7 @@ impl Settings {
         if let Some(inference) = &mut self.inference {
             inference.model = inference.model.trim().to_string();
             inference.base_url = clean(inference.base_url.take());
+            inference.program = clean(inference.program.take());
         }
         self
     }
@@ -256,6 +261,7 @@ mod tests {
                     kind: BackendKind::Gemini,
                     model: "  gemini-test  ".into(),
                     base_url: Some("   ".into()),
+                    program: Some("  ".into()),
                 }),
                 ..Settings::default()
             })
@@ -267,6 +273,7 @@ mod tests {
         assert_eq!(inference.kind, BackendKind::Gemini);
         assert_eq!(inference.model, "gemini-test");
         assert_eq!(inference.base_url, None);
+        assert_eq!(inference.program, None);
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"safetyMode\": \"delete_safe\""), "{text}");

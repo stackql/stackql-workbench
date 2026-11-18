@@ -31,6 +31,8 @@ pub fn default_model(kind: BackendKind) -> &'static str {
         BackendKind::Anthropic => anthropic::DEFAULT_MODEL,
         // There is no sensible default for an arbitrary compatible server.
         BackendKind::OpenaiCompatible => "",
+        // Empty leaves the choice to the agent.
+        BackendKind::GithubCopilot => "",
     }
 }
 
@@ -40,6 +42,8 @@ pub fn default_base_url(kind: BackendKind) -> &'static str {
         BackendKind::Gemini => gemini::DEFAULT_BASE_URL,
         BackendKind::Anthropic => anthropic::DEFAULT_BASE_URL,
         BackendKind::OpenaiCompatible => openai::DEFAULT_BASE_URL,
+        // A delegated agent has no address of ours.
+        BackendKind::GithubCopilot => "",
     }
 }
 
@@ -48,6 +52,12 @@ pub fn build(
     settings: &InferenceSettings,
     api_key: Option<String>,
 ) -> Result<Arc<dyn InferenceBackend>, InferenceError> {
+    if settings.kind.is_delegated() {
+        // A delegated agent runs its own loop. It has no request to build.
+        return Err(InferenceError::InvalidRequest(
+            "This backend is an agent, not a model API.".to_string(),
+        ));
+    }
     let model = if settings.model.trim().is_empty() {
         default_model(settings.kind).to_string()
     } else {
@@ -89,6 +99,11 @@ pub fn build(
         BackendKind::OpenaiCompatible => Arc::new(openai::OpenAiCompatible::new(
             http, base_url, model, api_key,
         )),
+        BackendKind::GithubCopilot => {
+            return Err(InferenceError::InvalidRequest(
+                "This backend is an agent, not a model API.".to_string(),
+            ));
+        }
     })
 }
 
@@ -236,6 +251,7 @@ mod tests {
             kind,
             model: model.to_string(),
             base_url: base_url.map(str::to_string),
+            program: None,
         }
     }
 

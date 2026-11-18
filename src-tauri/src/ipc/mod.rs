@@ -13,7 +13,9 @@ use crate::activity::{Activity, History, HistoryEntry, read_audit};
 use crate::agent::approvals::ApprovalDecision;
 use crate::agent::backend::BackendKind;
 use crate::agent::backends;
-use crate::agent::runtime::{AgentEvent, AgentRuntime, Emit, TurnSummary};
+use crate::agent::runtime::{
+    AgentEvent, AgentRuntime, DelegateInfo, DelegateRequest, Emit, TurnSummary,
+};
 use crate::config::{InferenceSettings, Settings, SettingsStore};
 use crate::connection::{Connection, EngineStatus, EventSink, SafetyMode};
 use crate::error::{HostError, HostResult};
@@ -284,29 +286,29 @@ pub struct BackendOption {
     pub default_model: String,
     pub default_base_url: String,
     pub key_optional: bool,
+    /// An agent the operator installed runs the model. There is no key and
+    /// no address to enter, and no approval prompt.
+    pub delegated: bool,
 }
 
 fn agent_config_view(state: &AppState) -> AgentConfigView {
     let settings = state.settings.get();
     let has_key = settings.inference.as_ref().is_some_and(|inference| {
-        state
-            .secrets
-            .get(inference.kind.secret_name())
-            .is_ok_and(|key| key.is_some())
+        inference
+            .kind
+            .secret_name()
+            .is_some_and(|name| state.secrets.get(name).is_ok_and(|key| key.is_some()))
     });
-    let backends = [
-        BackendKind::Gemini,
-        BackendKind::Anthropic,
-        BackendKind::OpenaiCompatible,
-    ]
-    .into_iter()
-    .map(|kind| BackendOption {
-        kind,
-        default_model: backends::default_model(kind).to_string(),
-        default_base_url: backends::default_base_url(kind).to_string(),
-        key_optional: kind.key_optional(),
-    })
-    .collect();
+    let backends = BackendKind::ALL
+        .into_iter()
+        .map(|kind| BackendOption {
+            kind,
+            default_model: backends::default_model(kind).to_string(),
+            default_base_url: backends::default_base_url(kind).to_string(),
+            key_optional: kind.key_optional(),
+            delegated: kind.is_delegated(),
+        })
+        .collect();
     AgentConfigView {
         inference: settings.inference,
         has_key,
@@ -329,8 +331,10 @@ pub async fn agent_config_save(
     inference: InferenceSettings,
     api_key: Option<String>,
 ) -> HostResult<AgentConfigView> {
-    if let Some(key) = api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
-        state.secrets.set(inference.kind.secret_name(), key)?;
+    if let Some(key) = api_key.as_deref().map(str::trim).filter(|k| !k.is_empty())
+        && let Some(name) = inference.kind.secret_name()
+    {
+        state.secrets.set(name, key)?;
     }
     let current = state.settings.get();
     state.settings.replace(Settings {
@@ -347,8 +351,12 @@ pub async fn agent_config_save(
 #[tauri::command]
 pub async fn agent_config_clear(state: State<'_, AppState>) -> HostResult<AgentConfigView> {
     let current = state.settings.get();
-    if let Some(inference) = &current.inference {
-        state.secrets.delete(inference.kind.secret_name())?;
+    if let Some(name) = current
+        .inference
+        .as_ref()
+        .and_then(|inference| inference.kind.secret_name())
+    {
+        state.secrets.delete(name)?;
     }
     state.settings.replace(Settings {
         inference: None,
@@ -385,15 +393,57 @@ pub async fn agent_send(
     let inference = settings.inference.ok_or_else(|| {
         HostError::Agent("Chat is not configured. Choose a backend in Settings.".to_string())
     })?;
-    let key = state.secrets.get(inference.kind.secret_name())?;
-    let backend =
-        backends::build(&inference, key).map_err(|err| HostError::Agent(err.to_string()))?;
     let emit: Emit = Arc::new(move |event| {
         let _ = on_event.send(event);
     });
+    if inference.kind.is_delegated() {
+        return state
+            .agent
+            .send_delegated(
+                delegate_request(&inference),
+                settings.safety_mode,
+                text,
+                emit,
+            )
+            .await;
+    }
+    let key = match inference.kind.secret_name() {
+        Some(name) => state.secrets.get(name)?,
+        None => None,
+    };
+    let backend =
+        backends::build(&inference, key).map_err(|err| HostError::Agent(err.to_string()))?;
     state
         .agent
         .send(backend, settings.safety_mode, text, emit)
+        .await
+}
+
+fn delegate_request(inference: &InferenceSettings) -> DelegateRequest {
+    DelegateRequest {
+        model: Some(inference.model.trim().to_string()).filter(|model| !model.is_empty()),
+        program: inference.program.as_deref().map(std::path::PathBuf::from),
+    }
+}
+
+/// Asks a delegated agent for its version and the models it offers. This
+/// starts the agent and opens a session, and sends no prompt. `program` is
+/// the location in the settings form, which may not be saved yet.
+#[tauri::command]
+pub async fn agent_delegate_info(
+    state: State<'_, AppState>,
+    program: Option<String>,
+) -> HostResult<DelegateInfo> {
+    let request = DelegateRequest {
+        model: None,
+        program: program
+            .map(|p| p.trim().trim_matches('"').to_string())
+            .filter(|p| !p.is_empty())
+            .map(std::path::PathBuf::from),
+    };
+    state
+        .agent
+        .delegate_info(request, state.settings.get().safety_mode)
         .await
 }
 
