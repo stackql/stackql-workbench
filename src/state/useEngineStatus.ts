@@ -7,6 +7,9 @@ const unknown: EngineStatus = {
   locationSource: null,
   version: null,
   endpoint: null,
+  dataFolder: null,
+  dataFolderSource: null,
+  dataFolderNote: null,
   error: null,
   logTail: [],
 };

@@ -81,6 +81,14 @@ pub struct EngineStatus {
     pub version: Option<String>,
     /// The address statements are sent to.
     pub endpoint: Option<String>,
+    /// Where the engine keeps its provider cache, when that is a folder on
+    /// this machine.
+    pub data_folder: Option<String>,
+    /// How the data folder was chosen, for example "settings".
+    pub data_folder_source: Option<String>,
+    /// Set when the data folder is not the one the operator would expect,
+    /// with the reason.
+    pub data_folder_note: Option<String>,
     /// Why the engine is not running, when it should be.
     pub error: Option<String>,
     /// The last lines the engine wrote to stderr. Shown with a failure.
@@ -95,6 +103,9 @@ impl EngineStatus {
             location_source: None,
             version: None,
             endpoint: None,
+            data_folder: None,
+            data_folder_source: None,
+            data_folder_note: None,
             error: None,
             log_tail: Vec::new(),
         }

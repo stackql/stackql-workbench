@@ -12,6 +12,12 @@ export interface EngineStatus {
   version: string | null;
   /** The address statements are sent to. */
   endpoint: string | null;
+  /** Where the engine keeps its provider cache, when that is on this machine. */
+  dataFolder: string | null;
+  /** How the data folder was chosen, for example "settings". */
+  dataFolderSource: string | null;
+  /** Set when the data folder is not the expected one, with the reason. */
+  dataFolderNote: string | null;
   error: string | null;
   /** The last lines the engine wrote to stderr. */
   logTail: string[];
@@ -36,6 +42,8 @@ export interface Settings {
   enginePath: string | null;
   /** A dotenv file the engine sources at startup. The app never reads it. */
   envFile: string | null;
+  /** The engine's data folder, its --approot. Null means the default. */
+  approot: string | null;
   safetyMode: SafetyMode;
   /** Null means chat is not configured. */
   inference: InferenceSettings | null;

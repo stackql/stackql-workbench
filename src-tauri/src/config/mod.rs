@@ -35,6 +35,10 @@ pub struct Settings {
     /// A dotenv file the engine sources at startup, passed with `--env.file`.
     /// The app never reads it.
     pub env_file: Option<String>,
+    /// The engine's data folder, passed with `--approot`. Empty means the
+    /// default: beside the app, or under the app data directory when that
+    /// cannot be written to.
+    pub approot: Option<String>,
     /// What the agent may do without asking. Passed to the engine, which
     /// enforces it.
     pub safety_mode: SafetyMode,
@@ -48,6 +52,7 @@ impl Settings {
     pub fn normalised(mut self) -> Self {
         self.engine_path = clean(self.engine_path);
         self.env_file = clean(self.env_file);
+        self.approot = clean(self.approot);
         if let Some(inference) = &mut self.inference {
             inference.model = inference.model.trim().to_string();
             inference.base_url = clean(inference.base_url.take());
@@ -192,6 +197,7 @@ mod tests {
             .replace(Settings {
                 engine_path: Some("  \"C:\\Program Files\\StackQL\\stackql.exe\"  ".into()),
                 env_file: Some("   ".into()),
+                approot: Some(" D:\\stackql data ".into()),
                 ..Settings::default()
             })
             .unwrap();
@@ -200,6 +206,25 @@ mod tests {
             Some("C:\\Program Files\\StackQL\\stackql.exe")
         );
         assert_eq!(saved.env_file, None);
+        assert_eq!(saved.approot.as_deref(), Some("D:\\stackql data"));
+    }
+
+    #[test]
+    fn the_data_folder_round_trips_and_defaults_to_unset() {
+        assert_eq!(Settings::default().approot, None);
+        let path = temp_file("approot");
+        let store = SettingsStore::load(path.clone());
+        store
+            .replace(Settings {
+                approot: Some("D:\\stackql".into()),
+                ..Settings::default()
+            })
+            .unwrap();
+        let reloaded = SettingsStore::load(path.clone()).get();
+        assert_eq!(reloaded.approot.as_deref(), Some("D:\\stackql"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"approot\""), "{text}");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

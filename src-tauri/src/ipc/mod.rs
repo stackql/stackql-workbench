@@ -73,9 +73,13 @@ pub async fn settings_save(state: State<'_, AppState>, settings: Settings) -> Ho
     let saved = state.settings.replace(Settings {
         engine_path: settings.engine_path,
         env_file: settings.env_file,
+        approot: settings.approot,
         ..before.clone()
     })?;
-    if before.engine_path != saved.engine_path || before.env_file != saved.env_file {
+    if before.engine_path != saved.engine_path
+        || before.env_file != saved.env_file
+        || before.approot != saved.approot
+    {
         state.connection.restart().await;
     }
     Ok(saved)

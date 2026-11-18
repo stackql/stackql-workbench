@@ -433,7 +433,7 @@ These are the decisions the findings forced, and where they landed.
 | No cancel | "Stop waiting" abandons the result and reconnects. The UI says the statement may still complete |
 | Upstream failures are silent by default | `srv` is started with `--pgsrv.debug.enable`, and notices are shown beside the result |
 | Notices accumulate per connection | The editor connection reports only newly appended notice text |
-| Default approot is the working directory | The host passes `--approot` explicitly, under the app data directory |
+| Default approot is the working directory | The host passes `--approot` explicitly: a folder of its own beside the executable, or one the operator names |
 
 ## Open items for the maintainer
 

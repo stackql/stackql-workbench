@@ -24,6 +24,7 @@ use crate::agent::runtime::AgentRuntime;
 use crate::config::SettingsStore;
 use crate::connection::Connection;
 use crate::connection::local::LocalConnection;
+use crate::engine::approot::Defaults as ApprootDefaults;
 use crate::icons::ProviderIcons;
 use crate::ipc::AppState;
 use crate::secrets::{KeychainStore, MemoryStore, SecretStore};
@@ -34,10 +35,16 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let cache_dir = app.path().app_cache_dir()?;
 
     let settings = Arc::new(SettingsStore::load(config_dir.join("settings.json")));
-    // The engine's provider cache lives under the app data directory. Its
+    // The engine's provider cache goes in a folder beside this executable,
+    // or under the app data directory when that place cannot be written to.
+    // The operator can name another folder in settings. The engine's own
     // default would be whatever directory the app was started from.
-    let connection: Arc<dyn Connection> = Arc::new(LocalConnection::new(
+    let approot_defaults = ApprootDefaults::for_executable(
+        std::env::current_exe().ok().as_deref(),
         data_dir.join("engine"),
+    );
+    let connection: Arc<dyn Connection> = Arc::new(LocalConnection::new(
+        approot_defaults,
         data_dir.join("audit"),
         settings.clone(),
     )?);

@@ -15,11 +15,13 @@ export function SettingsDialog({ status, onClose, children }: SettingsDialogProp
   const [loaded, setLoaded] = useState<Settings | null>(null);
   const [enginePath, setEnginePath] = useState('');
   const [envFile, setEnvFile] = useState('');
+  const [approot, setApproot] = useState('');
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const pathId = useId();
   const envId = useId();
+  const approotId = useId();
 
   useEffect(() => {
     let active = true;
@@ -31,6 +33,7 @@ export function SettingsDialog({ status, onClose, children }: SettingsDialogProp
         setLoaded(view.settings);
         setEnginePath(view.settings.enginePath ?? '');
         setEnvFile(view.settings.envFile ?? '');
+        setApproot(view.settings.approot ?? '');
         setWarning(view.warning);
       },
       (reason: unknown) => {
@@ -58,7 +61,9 @@ export function SettingsDialog({ status, onClose, children }: SettingsDialogProp
 
   const dirty =
     loaded !== null &&
-    (enginePath.trim() !== (loaded.enginePath ?? '') || envFile.trim() !== (loaded.envFile ?? ''));
+    (enginePath.trim() !== (loaded.enginePath ?? '') ||
+      envFile.trim() !== (loaded.envFile ?? '') ||
+      approot.trim() !== (loaded.approot ?? ''));
 
   const save = () => {
     if (!loaded) {
@@ -71,12 +76,14 @@ export function SettingsDialog({ status, onClose, children }: SettingsDialogProp
         ...loaded,
         enginePath: enginePath.trim() || null,
         envFile: envFile.trim() || null,
+        approot: approot.trim() || null,
       })
       .then(
         (saved) => {
           setLoaded(saved);
           setEnginePath(saved.enginePath ?? '');
           setEnvFile(saved.envFile ?? '');
+          setApproot(saved.approot ?? '');
           setSaving(false);
         },
         (reason: unknown) => {
@@ -141,7 +148,37 @@ export function SettingsDialog({ status, onClose, children }: SettingsDialogProp
               : 'No engine has been found.'}
           </p>
 
-          <label htmlFor={envId} className="block font-semibold">
+          <label htmlFor={approotId} className="block font-semibold">
+            Engine data folder
+          </label>
+          <p className="mb-1 text-ink-muted">
+            Optional. Where the engine keeps the providers it has pulled. Leave empty to use a
+            .stackql folder beside this app, or the app data folder when that place cannot be
+            written to. Providers pulled into one folder are not seen from another.
+          </p>
+          <input
+            id={approotId}
+            type="text"
+            spellCheck={false}
+            className="selectable h-7 w-full rounded border border-line bg-surface px-2 font-mono text-[12px]"
+            placeholder={status.dataFolder ?? 'Full path to a folder'}
+            value={approot}
+            onChange={(event) => {
+              setApproot(event.target.value);
+            }}
+          />
+          <p className="selectable mt-1 text-[12px] text-ink-muted">
+            {status.dataFolder
+              ? `In use: ${status.dataFolder}${
+                  status.dataFolderSource ? `, ${status.dataFolderSource}` : ''
+                }`
+              : 'No folder is in use yet.'}
+          </p>
+          {status.dataFolderNote && (
+            <p className="selectable mt-1 text-[12px] text-warn">{status.dataFolderNote}</p>
+          )}
+
+          <label htmlFor={envId} className="mt-3 block font-semibold">
             Credentials file
           </label>
           <p className="mb-1 text-ink-muted">

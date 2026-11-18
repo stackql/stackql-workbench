@@ -27,6 +27,7 @@ use stackql_workbench_lib::agent::runtime::{AgentEvent, AgentRuntime, Emit};
 use stackql_workbench_lib::config::{Settings, SettingsStore};
 use stackql_workbench_lib::connection::local::LocalConnection;
 use stackql_workbench_lib::connection::{Connection, EngineState, SafetyMode};
+use stackql_workbench_lib::engine::approot::Defaults as ApprootDefaults;
 use stackql_workbench_lib::engine::discovery::{self, Inputs};
 
 const DELETE_SQL: &str =
@@ -126,8 +127,14 @@ async fn fixture(name: &str) -> Fixture {
     let approot = std::env::temp_dir().join(format!("wb-agent-it-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&approot);
     let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
-    let connection =
-        Arc::new(LocalConnection::new(approot.clone(), approot.join("audit"), settings).unwrap());
+    let connection = Arc::new(
+        LocalConnection::new(
+            ApprootDefaults::fixed(approot.clone()),
+            approot.join("audit"),
+            settings,
+        )
+        .unwrap(),
+    );
     let status = connection.start().await;
     assert_eq!(
         status.state,
@@ -566,8 +573,14 @@ async fn changing_the_safety_mode_opens_a_new_engine_session() {
 async fn without_a_running_engine_the_turn_fails_plainly() {
     let approot = std::env::temp_dir().join(format!("wb-agent-it-{}-noengine", std::process::id()));
     let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
-    let connection =
-        Arc::new(LocalConnection::new(approot.clone(), approot.join("audit"), settings).unwrap());
+    let connection = Arc::new(
+        LocalConnection::new(
+            ApprootDefaults::fixed(approot.clone()),
+            approot.join("audit"),
+            settings,
+        )
+        .unwrap(),
+    );
     let runtime = AgentRuntime::new(connection);
     let (emit, _events) = collector();
     let err = runtime

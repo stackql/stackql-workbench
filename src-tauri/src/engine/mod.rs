@@ -3,6 +3,7 @@
 //! Nothing outside `connection::local` should need this module: code above
 //! the `Connection` trait must not assume the engine is a child process.
 
+pub mod approot;
 pub mod discovery;
 pub mod logbuf;
 pub mod port;

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -16,6 +16,7 @@ use tokio::sync::{Notify, watch};
 
 use super::{AgentChannel, Connection, EngineState, EngineStatus, EventSink, SafetyMode};
 use crate::config::SettingsStore;
+use crate::engine::approot::{self, Defaults as ApprootDefaults};
 use crate::engine::discovery::{self, Inputs, Resolved};
 use crate::engine::logbuf::LogBuffer;
 use crate::engine::port::pick_free_port;
@@ -42,13 +43,19 @@ struct Endpoint {
     stderr: LogBuffer,
 }
 
+/// What the running engine was started with. The agent channel starts its
+/// MCP server from the same binary, on the same data folder.
+#[derive(Clone)]
+struct Launch {
+    binary: PathBuf,
+    approot: PathBuf,
+}
+
 /// State shared with the task that watches for the engine exiting.
 struct Shared {
     status: watch::Sender<EngineStatus>,
     endpoint: Mutex<Option<Endpoint>>,
-    /// The binary the running engine was started from. The agent channel
-    /// starts its MCP server from the same one.
-    binary: Mutex<Option<PathBuf>>,
+    launch: Mutex<Option<Launch>>,
     /// Bumped on every start and stop, so a watcher from an earlier engine
     /// cannot overwrite the status of a later one.
     generation: AtomicU64,
@@ -62,8 +69,9 @@ impl Shared {
 
 pub struct LocalConnection {
     supervisor: Supervisor,
-    /// The engine's `--approot` and working directory.
-    approot: PathBuf,
+    /// Where the engine's data folder goes when settings name none. The
+    /// folder is the engine's `--approot` and its working directory.
+    approot_defaults: ApprootDefaults,
     /// Where the MCP server writes its audit log.
     audit_dir: PathBuf,
     settings: Arc<SettingsStore>,
@@ -77,7 +85,7 @@ pub struct LocalConnection {
 
 impl LocalConnection {
     pub fn new(
-        approot: PathBuf,
+        approot_defaults: ApprootDefaults,
         audit_dir: PathBuf,
         settings: Arc<SettingsStore>,
     ) -> HostResult<Self> {
@@ -85,13 +93,13 @@ impl LocalConnection {
         let (status, _) = watch::channel(EngineStatus::stopped());
         Ok(Self {
             supervisor,
-            approot,
+            approot_defaults,
             audit_dir,
             settings,
             shared: Arc::new(Shared {
                 status,
                 endpoint: Mutex::new(None),
-                binary: Mutex::new(None),
+                launch: Mutex::new(None),
                 generation: AtomicU64::new(0),
             }),
             lifecycle: tokio::sync::Mutex::new(None),
@@ -108,7 +116,7 @@ impl LocalConnection {
 
     /// Arguments for `stackql srv`. See the engine interface section of
     /// CLAUDE.md and `docs/spike-pgwire.md` for the reason behind each one.
-    fn srv_args(&self, port: u16, env_file: Option<&str>) -> Vec<OsString> {
+    fn srv_args(&self, port: u16, approot: &Path, env_file: Option<&str>) -> Vec<OsString> {
         let mut args: Vec<OsString> = vec![
             "srv".into(),
             // The default is 0.0.0.0 and the listener has no authentication.
@@ -118,7 +126,7 @@ impl LocalConnection {
             port.to_string().into(),
             // The default is the working directory.
             "--approot".into(),
-            self.approot.clone().into_os_string(),
+            approot.as_os_str().to_os_string(),
             // Without this an upstream API failure is an empty result with
             // the reason only on stderr. With it the reason arrives as a
             // notice on the connection that ran the statement.
@@ -132,7 +140,7 @@ impl LocalConnection {
     }
 
     /// Arguments for `stackql mcp`. See `docs/spike-mcp.md`.
-    fn mcp_args(&self, mode: SafetyMode, env_file: Option<&str>) -> Vec<OsString> {
+    fn mcp_args(&self, mode: SafetyMode, approot: &Path, env_file: Option<&str>) -> Vec<OsString> {
         let config = serde_json::json!({
             "server": {
                 "transport": "stdio",
@@ -153,7 +161,7 @@ impl LocalConnection {
             // The default transport is HTTP.
             "--mcp.server.type=stdio".into(),
             "--approot".into(),
-            self.approot.clone().into_os_string(),
+            approot.as_os_str().to_os_string(),
         ];
         if let Some(file) = env_file {
             args.push("--env.file".into());
@@ -167,7 +175,7 @@ impl LocalConnection {
     async fn stop_engine(&self, child: &mut Option<ManagedChild>) {
         self.shared.generation.fetch_add(1, Ordering::SeqCst);
         *lock(&self.shared.endpoint) = None;
-        *lock(&self.shared.binary) = None;
+        *lock(&self.shared.launch) = None;
         // Drop the session first so its socket closes before the engine goes.
         if let Ok(mut session) = self.session.try_lock() {
             *session = None;
@@ -213,24 +221,30 @@ impl LocalConnection {
         }
         self.shared.set_status(status.clone());
 
-        // 3. Start it on a free loopback port.
-        if let Err(err) = std::fs::create_dir_all(&self.approot) {
-            return fail(
-                status,
-                format!(
-                    "Could not create the engine data folder {}: {err}",
-                    self.approot.display()
-                ),
-                Vec::new(),
-            );
-        }
+        // 3. Choose its data folder. A folder named in settings is used or
+        // reported as unusable. The defaults fall through to one that works.
+        let chosen = match approot::resolve(
+            settings.approot.as_deref().map(Path::new),
+            &self.approot_defaults,
+            approot::prepare,
+        ) {
+            Ok(chosen) => chosen,
+            Err(err) => return fail(status, err.to_string(), Vec::new()),
+        };
+        status.data_folder = Some(chosen.path.display().to_string());
+        status.data_folder_source = Some(chosen.source.label().to_string());
+        status.data_folder_note = chosen.note;
+        self.shared.set_status(status.clone());
+        let approot = chosen.path;
+
+        // 4. Start it on a free loopback port.
         let port = match pick_free_port() {
             Ok(port) => port,
             Err(err) => return fail(status, format!("No free port: {err}"), Vec::new()),
         };
         let spec = ChildSpec {
             program: path.clone(),
-            args: self.srv_args(port, settings.env_file.as_deref()),
+            args: self.srv_args(port, &approot, settings.env_file.as_deref()),
             // The engine reads provider credentials from its environment.
             // Until the keychain store exists, the app's environment is the
             // base and an operator-supplied --env.file adds to it. On macOS
@@ -240,7 +254,7 @@ impl LocalConnection {
                 inherit: true,
                 vars: Vec::new(),
             },
-            cwd: self.approot.clone(),
+            cwd: approot.clone(),
             stdio: StdioMode::Detached,
         };
         let mut running = match self.supervisor.spawn(&spec) {
@@ -248,7 +262,7 @@ impl LocalConnection {
             Err(err) => return fail(status, err.to_string(), Vec::new()),
         };
 
-        // 4. Wait until it answers.
+        // 5. Wait until it answers.
         status.endpoint = Some(format!("127.0.0.1:{port}"));
         match wait_ready(port, &running).await {
             Ok(reported) => {
@@ -263,12 +277,15 @@ impl LocalConnection {
             }
         }
 
-        // 5. Publish, and watch for it going away.
+        // 6. Publish, and watch for it going away.
         *lock(&self.shared.endpoint) = Some(Endpoint {
             port,
             stderr: running.stderr.clone(),
         });
-        *lock(&self.shared.binary) = Some(path);
+        *lock(&self.shared.launch) = Some(Launch {
+            binary: path,
+            approot,
+        });
         status.state = EngineState::Running;
         self.shared.set_status(status.clone());
 
@@ -525,7 +542,7 @@ impl Connection for LocalConnection {
 
     fn open_agent_channel(&self, mode: SafetyMode) -> BoxFuture<'_, HostResult<AgentChannel>> {
         async move {
-            let binary = lock(&self.shared.binary)
+            let launch = lock(&self.shared.launch)
                 .clone()
                 .ok_or(HostError::EngineNotRunning)?;
             std::fs::create_dir_all(&self.audit_dir).map_err(|err| {
@@ -536,15 +553,15 @@ impl Connection for LocalConnection {
             })?;
             let settings = self.settings.get();
             let spec = ChildSpec {
-                program: binary,
-                args: self.mcp_args(mode, settings.env_file.as_deref()),
+                program: launch.binary.clone(),
+                args: self.mcp_args(mode, &launch.approot, settings.env_file.as_deref()),
                 // Same environment policy as the operator's engine. The model
                 // never sees any of it: tool results are all it receives.
                 env: EnvSpec {
                     inherit: true,
                     vars: Vec::new(),
                 },
-                cwd: self.approot.clone(),
+                cwd: launch.approot.clone(),
                 // stdout and stdin carry protocol frames and nothing else.
                 stdio: StdioMode::Piped,
             };

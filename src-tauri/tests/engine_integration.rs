@@ -12,6 +12,7 @@ use std::time::Duration;
 use stackql_workbench_lib::config::{Settings, SettingsStore};
 use stackql_workbench_lib::connection::local::LocalConnection;
 use stackql_workbench_lib::connection::{Connection, EngineState, EventSink};
+use stackql_workbench_lib::engine::approot::Defaults as ApprootDefaults;
 use stackql_workbench_lib::engine::discovery::{self, Inputs};
 use stackql_workbench_lib::error::HostError;
 use stackql_workbench_lib::query::explorer;
@@ -37,8 +38,12 @@ fn scratch_approot(name: &str) -> PathBuf {
 async fn started(name: &str) -> (LocalConnection, PathBuf) {
     let approot = scratch_approot(name);
     let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
-    let connection =
-        LocalConnection::new(approot.clone(), approot.join("audit"), settings).unwrap();
+    let connection = LocalConnection::new(
+        ApprootDefaults::fixed(approot.clone()),
+        approot.join("audit"),
+        settings,
+    )
+    .unwrap();
     let status = connection.start().await;
     assert_eq!(
         status.state,
@@ -290,8 +295,12 @@ async fn explorer_statements_work_against_the_built_in_provider() {
 async fn a_run_without_an_engine_says_so() {
     let approot = scratch_approot("stopped");
     let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
-    let connection =
-        LocalConnection::new(approot.clone(), approot.join("audit"), settings).unwrap();
+    let connection = LocalConnection::new(
+        ApprootDefaults::fixed(approot.clone()),
+        approot.join("audit"),
+        settings,
+    )
+    .unwrap();
     let (sink, _) = collector();
     let err = connection
         .run("run-1".into(), "SHOW VERSION".into(), sink)
@@ -308,12 +317,102 @@ async fn a_wrong_engine_path_is_reported_in_the_status() {
         engine_path: Some("/definitely/not/here/stackql".into()),
         ..Settings::default()
     }));
-    let connection =
-        LocalConnection::new(approot.clone(), approot.join("audit"), settings).unwrap();
+    let connection = LocalConnection::new(
+        ApprootDefaults::fixed(approot.clone()),
+        approot.join("audit"),
+        settings,
+    )
+    .unwrap();
     let status = connection.start().await;
     assert_eq!(status.state, EngineState::Failed);
     let error = status.error.unwrap();
     assert!(error.contains("Settings"), "points at settings: {error}");
+}
+
+#[tokio::test]
+async fn the_data_folder_defaults_to_beside_the_app_and_settings_override_it() {
+    if !engine_available() {
+        return;
+    }
+    let root = scratch_approot("datafolder");
+    let beside = root.join("app").join(".stackql");
+    let fallback = root.join("data").join("engine");
+    let named = root.join("named");
+
+    // With nothing in settings, the folder beside the app is used.
+    let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
+    let connection = LocalConnection::new(
+        ApprootDefaults {
+            beside_app: Some(beside.clone()),
+            fallback: fallback.clone(),
+        },
+        root.join("audit"),
+        settings.clone(),
+    )
+    .unwrap();
+    let status = connection.start().await;
+    assert_eq!(status.state, EngineState::Running, "{:?}", status.error);
+    assert_eq!(
+        status.data_folder.as_deref(),
+        Some(beside.to_str().unwrap())
+    );
+    assert_eq!(status.data_folder_source.as_deref(), Some("beside the app"));
+    assert_eq!(status.data_folder_note, None);
+    assert!(beside.is_dir(), "the engine's folder exists");
+    assert!(!fallback.exists(), "the fallback is left alone");
+
+    // A folder named in settings takes over at the next start.
+    settings
+        .replace(Settings {
+            approot: Some(named.to_str().unwrap().to_string()),
+            ..Settings::default()
+        })
+        .unwrap();
+    let status = connection.restart().await;
+    assert_eq!(status.state, EngineState::Running, "{:?}", status.error);
+    assert_eq!(status.data_folder.as_deref(), Some(named.to_str().unwrap()));
+    assert_eq!(status.data_folder_source.as_deref(), Some("settings"));
+    let (sink, _) = collector();
+    let summary = connection
+        .run("run-1".into(), "SHOW PROVIDERS".into(), sink)
+        .await
+        .unwrap();
+    assert_eq!(summary.completed, 1);
+    assert!(named.is_dir());
+
+    finish(connection, root).await;
+}
+
+#[tokio::test]
+async fn a_data_folder_that_cannot_be_used_is_reported_in_the_status() {
+    if !engine_available() {
+        return;
+    }
+    let root = scratch_approot("baddatafolder");
+    std::fs::create_dir_all(&root).unwrap();
+    // A file where the folder should be.
+    let blocked = root.join("not-a-folder");
+    std::fs::write(&blocked, b"x").unwrap();
+
+    let settings = Arc::new(SettingsStore::in_memory(Settings {
+        approot: Some(blocked.to_str().unwrap().to_string()),
+        ..Settings::default()
+    }));
+    let connection = LocalConnection::new(
+        ApprootDefaults::fixed(root.join("engine")),
+        root.join("audit"),
+        settings,
+    )
+    .unwrap();
+    let status = connection.start().await;
+    assert_eq!(status.state, EngineState::Failed);
+    let error = status.error.unwrap();
+    assert!(error.contains("Settings"), "points at settings: {error}");
+    assert!(
+        !root.join("engine").exists(),
+        "a folder named in settings is never replaced by a default"
+    );
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]

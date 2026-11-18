@@ -86,7 +86,7 @@ stackql-workbench/
     ui/                 small shared components
   src-tauri/            host (Rust)
     src/
-      engine/           discovery, port selection, supervisor, job object, watchdog
+      engine/           discovery, data folder, port selection, supervisor, job object, watchdog
       connection/       Connection trait, LocalConnection, safety mode, agent channel
       query/            pg wire session, statement splitting, results, explorer statements
       agent/            MCP client, approvals, InferenceBackend trait, backends, loop
@@ -136,7 +136,8 @@ Things to know about them:
 - `npm test` goes through `scripts/test.js`. Vitest fails on Windows when the working directory is spelled with a lower-case drive letter, which an editor terminal can do. The launcher corrects that.
 - `cargo test` includes integration tests that start a real `stackql`. They are skipped, with a note on stderr, when no binary is found. They need no credentials and no network.
 - The release executable is `src-tauri/target/release/stackql-workbench.exe` on Windows.
-- The engine's `--approot` is `<app data dir>/engine`. On Windows that is `%APPDATA%\io.stackql.workbench\engine`. Settings are in `<app config dir>/settings.json`. The agent audit log is in `<app data dir>/audit` and the operator's statement history in `<app data dir>/history.jsonl`.
+- The engine's `--approot` is `.stackql` beside the Workbench executable. For a build from this repository that is `src-tauri/target/release/.stackql`, or `target/debug/.stackql` under `npm run tauri dev`. Where that folder cannot be written to, the fallback is `<app data dir>/engine`, which on Windows is `%APPDATA%\io.stackql.workbench\engine`. The operator can name another folder in Settings.
+- Settings are in `<app config dir>/settings.json`. The agent audit log is in `<app data dir>/audit` and the operator's statement history in `<app data dir>/history.jsonl`. Those two do not move with the engine's data folder.
 - One test writes and removes a throwaway entry in the real OS keychain. It skips itself where no keychain can be opened.
 - An editor's language server can build in the same `target` directory and hold a file the build needs, which shows up as linker error `LNK1104` on Windows. Running the command again clears it.
 
@@ -176,7 +177,11 @@ Flags the host passes:
 
 - `--pgsrv.address 127.0.0.1`, always. The default is `0.0.0.0` and the listener has no authentication.
 - `--pgsrv.port` with a free port chosen by the host. The default is 5466 and may be taken.
-- `--approot` with a directory under the app data directory. The default is `.stackql` in the working directory, so the provider cache would otherwise follow wherever the app was started from.
+- `--approot` with the engine's data folder, always. The engine's own default is `.stackql` in the working directory, so the provider cache would otherwise follow wherever the app was started from. The host resolves the folder in this order and stops at the first hit.
+  1. Explicit folder in settings. This source is strict: a folder that is not a full path, or cannot be created or written to, is an error and the engine does not start.
+  2. `.stackql` beside the Workbench executable. Skipped inside a macOS app bundle, because adding a file to a signed bundle breaks its signature.
+  3. `<app data dir>/engine`. Used when the folder beside the executable cannot be written to, which is the normal case for an app installed under `Program Files`. The settings pane says so.
+- The Workbench does not share the operator's own `.stackql` folder unless they point it there.
 - `--pgsrv.debug.enable`. Without it an upstream API failure is an empty, successful result with the reason only on stderr. With it the reason arrives as a pg notice on the connection that ran the statement.
 - `--env.file` when the operator has set a credentials file.
 
