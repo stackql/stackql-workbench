@@ -328,7 +328,11 @@ These rules hold for every backend.
 
 A few fixed points for the interface.
 
-- Brand colour is Classic Blue, `#0F4C81`.
+- Brand colour is Classic Blue, `#0F4C81`. It is the primary colour: primary buttons, the selection, links, focus rings, the tab in front and the wordmark. There is no second blue. The lighter and darker blues are steps of it, kept as tokens.
+- Every colour is a token in `src/styles.css`. A component names a token and never a colour value. The dark theme applies when the root element carries `data-theme="dark"`. That follows the system setting unless the operator picks Light or Dark under View, and the pick is kept in the webview's local storage.
+- A test reads the stylesheet and checks each pair of text and surface against WCAG AA, 4.5 to 1, in both themes. A token change that breaks a pair fails the test.
+- The StackQL wordmark heads the side menu. Its outline is `static/img/logo-original.svg` from `stackql/stackql.io`, drawn in the accent colour so it follows the theme.
+- The status bar is neutral. A coloured dot carries the engine's state.
 - The app icon is StackQL's own favicon. The files in `src-tauri/icons/` were generated with `npx tauri icon` from `static/android-chrome-512x512.png` in the `stackql/stackql.io` repository, which is the same mark as its `favicon.ico` at a usable resolution.
 - Provider nodes in the explorer show the provider's own icon. The host resolves it through the provider dictionary published at `src/configs/providers.json` in `stackql/stackql.io`, fetches the icon from `stackql.io`, caches it in the app cache directory and passes it to the webview as a `data:` URL. A provider with no entry, or whose icon cannot be fetched, shows the letter badge. Providers built into the engine, such as `stackql_preview`, show the StackQL icon, which is compiled in. The webview itself still makes no network calls. A snapshot of the dictionary is compiled in as a fallback.
 - Saved queries are plain `.iql` files on disk, not an app database.

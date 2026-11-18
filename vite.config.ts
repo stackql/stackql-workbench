@@ -33,5 +33,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
+    // The contrast test reads the stylesheet's own text. Without this a
+    // stylesheet imported in a test arrives empty.
+    css: true,
   },
 });

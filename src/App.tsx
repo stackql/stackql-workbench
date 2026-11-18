@@ -24,6 +24,7 @@ import { useAgent, type AgentResult } from './state/useAgent';
 import { useEngineStatus } from './state/useEngineStatus';
 import { useQueryRun } from './state/useQueryRun';
 import { useTabs } from './state/useTabs';
+import { useTheme } from './state/useTheme';
 import { IconButton, ICON_BUTTON_CLASS } from './ui/IconButton';
 import { Check, History, Play, Terminal, Warning } from './ui/icons';
 import { Popover } from './ui/Popover';
@@ -86,6 +87,7 @@ export function App() {
   const status = useEngineStatus();
   const query = useQueryRun();
   const tabs = useTabs(WELCOME_TEXT);
+  const { choice: themeChoice, setChoice: setThemeChoice } = useTheme();
 
   // Chat is where the app opens. The explorer and activity are a click away.
   const [view, setView] = useState<View>('chat');
@@ -293,6 +295,15 @@ export function App() {
           setView('explorer');
           explorer.current?.jump();
           break;
+        case 'themeSystem':
+          setThemeChoice('system');
+          break;
+        case 'themeLight':
+          setThemeChoice('light');
+          break;
+        case 'themeDark':
+          setThemeChoice('dark');
+          break;
         case 'run':
           setView('explorer');
           run(activeEditor()?.runText() ?? '');
@@ -344,7 +355,7 @@ export function App() {
           break;
       }
     },
-    [newChat, restart, openTab, activeEditor, run],
+    [newChat, restart, openTab, activeEditor, run, setThemeChoice],
   );
 
   useEffect(() => {
@@ -371,9 +382,26 @@ export function App() {
     [engineBusy, engineRunning, running],
   );
 
+  const chosenCommands = useMemo(
+    () =>
+      new Set<CommandId>([
+        themeChoice === 'light'
+          ? 'themeLight'
+          : themeChoice === 'dark'
+            ? 'themeDark'
+            : 'themeSystem',
+      ]),
+    [themeChoice],
+  );
+
   return (
     <div className="flex h-full flex-col bg-surface-alt">
-      <MenuBar isMac={IS_MAC} onCommand={runCommand} disabled={disabledCommands} />
+      <MenuBar
+        isMac={IS_MAC}
+        onCommand={runCommand}
+        disabled={disabledCommands}
+        chosen={chosenCommands}
+      />
       <EngineBanner
         status={status}
         onRetry={restart}

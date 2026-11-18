@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { MENUS, shortcutLabel, type CommandId } from '../../lib/menu';
+import { Check } from '../../ui/icons';
 
 interface MenuBarProps {
   isMac: boolean;
   onCommand: (id: CommandId) => void;
   /** Commands that cannot run right now. They are shown dimmed. */
   disabled?: ReadonlySet<CommandId>;
+  /** The choices that are in effect. They are shown with a mark. */
+  chosen?: ReadonlySet<CommandId>;
 }
 
 /**
@@ -15,7 +18,7 @@ interface MenuBarProps {
  * The menus are drawn in the webview, so they look and behave the same on
  * every platform and can be checked like any other part of the page.
  */
-export function MenuBar({ isMac, onCommand, disabled }: MenuBarProps) {
+export function MenuBar({ isMac, onCommand, disabled, chosen }: MenuBarProps) {
   const [open, setOpen] = useState<number | null>(null);
   const bar = useRef<HTMLDivElement>(null);
 
@@ -99,7 +102,8 @@ export function MenuBar({ isMac, onCommand, disabled }: MenuBarProps) {
                   <button
                     key={entry.id}
                     type="button"
-                    role="menuitem"
+                    role={entry.choice ? 'menuitemradio' : 'menuitem'}
+                    aria-checked={entry.choice ? (chosen?.has(entry.id) ?? false) : undefined}
                     data-command={entry.id}
                     disabled={disabled?.has(entry.id)}
                     className="flex h-7 w-full items-center gap-6 px-3 text-left whitespace-nowrap hover:bg-surface-sunken disabled:opacity-50 disabled:hover:bg-transparent"
@@ -112,6 +116,7 @@ export function MenuBar({ isMac, onCommand, disabled }: MenuBarProps) {
                     }}
                   >
                     <span className="flex-1">{entry.label}</span>
+                    {entry.choice && chosen?.has(entry.id) && <Check className="text-accent" />}
                     {entry.shortcut && (
                       <span className="text-[12px] text-ink-muted">
                         {shortcutLabel(entry.shortcut, isMac)}

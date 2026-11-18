@@ -69,7 +69,7 @@ export function AddProviderDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-16"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-16"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();

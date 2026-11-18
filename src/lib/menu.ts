@@ -13,6 +13,9 @@ export type CommandId =
   | 'restartEngine'
   | 'refreshExplorer'
   | 'goToResource'
+  | 'themeSystem'
+  | 'themeLight'
+  | 'themeDark'
   | 'run'
   | 'runSelection'
   | 'addProvider'
@@ -41,7 +44,15 @@ export interface Shortcut {
 }
 
 export type MenuEntry =
-  { kind: 'command'; id: CommandId; label: string; shortcut?: Shortcut } | { kind: 'separator' };
+  | {
+      kind: 'command';
+      id: CommandId;
+      label: string;
+      shortcut?: Shortcut;
+      /** One of a set of which exactly one is chosen. It is drawn with a mark when it is. */
+      choice?: boolean;
+    }
+  | { kind: 'separator' };
 
 export interface Menu {
   label: string;
@@ -53,6 +64,12 @@ const command = (id: CommandId, label: string, shortcut?: Shortcut): MenuEntry =
   id,
   label,
   ...(shortcut ? { shortcut } : {}),
+});
+const choice = (id: CommandId, label: string): MenuEntry => ({
+  kind: 'command',
+  id,
+  label,
+  choice: true,
 });
 const separator: MenuEntry = { kind: 'separator' };
 const native = (key: string): Shortcut => ({ key, handled: false });
@@ -94,6 +111,10 @@ export const MENUS: Menu[] = [
       command('refreshExplorer', 'Refresh Explorer'),
       separator,
       command('toggleSidebar', 'Toggle Sidebar', { key: 'b' }),
+      separator,
+      choice('themeSystem', 'Theme: Follow the System'),
+      choice('themeLight', 'Theme: Light'),
+      choice('themeDark', 'Theme: Dark'),
     ],
   },
   {

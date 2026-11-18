@@ -31,11 +31,11 @@ interface StatusBarProps {
 export function StatusBar({ status, restarting, onRestart, children }: StatusBarProps) {
   const busy = restarting || status.state === 'starting';
   return (
-    <div className="flex h-6 shrink-0 items-center gap-3 border-t border-line bg-brand px-2 text-[12px] text-on-brand">
+    <div className="flex h-6 shrink-0 items-center gap-3 border-t border-line bg-surface-alt px-2 text-[12px] text-ink-muted">
       <Popover
         label="Engine details"
         placement="top"
-        triggerClassName="flex h-5 shrink-0 items-center gap-1.5 rounded px-1 hover:bg-white/15"
+        triggerClassName="flex h-5 shrink-0 items-center gap-1.5 rounded px-1 text-ink hover:bg-surface-sunken"
         trigger={
           <span className="flex items-center gap-1.5" role="status">
             {busy ? (
@@ -79,7 +79,7 @@ function Address({ endpoint }: { endpoint: string }) {
   const connection = connectionString(endpoint);
   if (connection === null) {
     return (
-      <span className="selectable shrink-0 opacity-90" title="Address statements are sent to">
+      <span className="selectable shrink-0" title="Address statements are sent to">
         {endpoint}
       </span>
     );
@@ -87,7 +87,7 @@ function Address({ endpoint }: { endpoint: string }) {
   return (
     <button
       type="button"
-      className="flex h-5 shrink-0 items-center rounded px-1 opacity-90 hover:bg-white/15 hover:opacity-100"
+      className="flex h-5 shrink-0 items-center rounded px-1 hover:bg-surface-sunken hover:text-ink"
       title={`The engine's Postgres wire address, on this machine only. Click to copy a connection string:\n${connection}`}
       onClick={() => {
         void copyText(connection).then((ok) => {

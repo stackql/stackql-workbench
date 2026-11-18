@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Gear, History, NewChat, Sidebar, Spinner, Tree } from '../../ui/icons';
+import { Wordmark } from '../../ui/Wordmark';
 
 /** The main views. One is shown at a time. */
 export type View = 'chat' | 'explorer' | 'activity';
@@ -36,12 +37,15 @@ export function SideNav({
       }`}
     >
       <div className="flex flex-col gap-0.5 p-1.5">
-        <Item
-          icon={<Sidebar />}
-          label={collapsed ? 'Show menu' : 'Hide menu'}
-          collapsed
-          onClick={onToggle}
-        />
+        <div className="flex h-8 items-center gap-2">
+          <Item
+            icon={<Sidebar />}
+            label={collapsed ? 'Show menu' : 'Hide menu'}
+            collapsed
+            onClick={onToggle}
+          />
+          {!collapsed && <Wordmark className="h-[13px] w-auto shrink-0 text-accent" />}
+        </div>
         <Item
           icon={<NewChat />}
           label="New Chat"
@@ -124,7 +128,11 @@ function Item({ icon, label, title, collapsed, active, onClick }: ItemProps) {
       } ${active ? 'bg-surface-sunken font-medium' : ''}`}
       onClick={onClick}
     >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-muted">
+      <span
+        className={`flex h-4 w-4 shrink-0 items-center justify-center ${
+          active ? 'text-accent' : 'text-ink-muted'
+        }`}
+      >
         {icon}
       </span>
       {!collapsed && <span className="min-w-0 truncate">{label}</span>}

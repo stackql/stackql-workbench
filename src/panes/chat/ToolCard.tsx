@@ -50,7 +50,11 @@ export function ToolCard({ item, onOpenInEditor, onShowTable, onAnswer }: ToolCa
             {item.agent}
           </span>
         )}
-        {args !== '' && <span className="selectable min-w-0 truncate text-ink-muted">{args}</span>}
+        {args !== '' && (
+          <span className="selectable min-w-0 truncate font-mono text-[12px] text-ink-muted">
+            {args}
+          </span>
+        )}
         <span className="flex-1" />
         {item.elapsedMs !== null && (
           <span className="shrink-0 text-[11px] text-ink-muted tabular-nums">

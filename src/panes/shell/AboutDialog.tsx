@@ -47,7 +47,7 @@ export function AboutDialog({ status, onClose }: AboutDialogProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-24"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-24"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();

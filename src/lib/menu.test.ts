@@ -49,6 +49,14 @@ describe('the menus', () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it('offer the theme as a choice of three under View', () => {
+    const view = MENUS.find((menu) => menu.label === 'View');
+    const choices = (view?.entries ?? []).flatMap((entry) =>
+      entry.kind === 'command' && entry.choice ? [entry.id] : [],
+    );
+    expect(choices).toEqual(['themeSystem', 'themeLight', 'themeDark']);
+  });
+
   it('never start or end with a separator, or have two in a row', () => {
     for (const menu of MENUS) {
       const kinds = menu.entries.map((entry) => entry.kind);

@@ -48,7 +48,9 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onNew }: TabStri
           <div
             key={tab.id}
             className={`group flex shrink-0 items-center border-r border-line ${
-              active ? 'bg-surface text-ink' : 'text-ink-muted hover:bg-surface-sunken'
+              active
+                ? 'bg-surface text-ink shadow-[inset_0_2px_0_var(--color-accent)]'
+                : 'text-ink-muted hover:bg-surface-sunken'
             }`}
           >
             <button
