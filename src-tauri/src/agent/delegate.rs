@@ -75,6 +75,10 @@ pub struct Profile {
     /// Events of the agent's own to ask for at the handshake. Empty when
     /// there are none.
     pub session_events: &'static [&'static str],
+    /// How to start a subagent with this agent so that it can do the work:
+    /// which kind and which mode. Added to the guidance on subagents. Empty
+    /// when the agent needs no such advice.
+    pub subagent_hint: &'static str,
 }
 
 /// A model the agent offers.
@@ -267,7 +271,12 @@ impl DelegateSession {
         if !self.primed {
             blocks.push(json!({ "type": "text", "text": PRIMER }));
             if self.subagents {
-                blocks.push(json!({ "type": "text", "text": SUBAGENT_PRIMER }));
+                let mut guidance = SUBAGENT_PRIMER.to_string();
+                if !self.profile.subagent_hint.is_empty() {
+                    guidance.push('\n');
+                    guidance.push_str(self.profile.subagent_hint);
+                }
+                blocks.push(json!({ "type": "text", "text": guidance }));
             }
         }
         blocks.push(json!({ "type": "text", "text": text }));
@@ -791,6 +800,7 @@ mod tests {
         tool_prefix: "stackql-",
         vendor_key: "example.com/agent",
         session_events: &["subagent.started"],
+        subagent_hint: "- Use the plain kind of subagent.",
     };
 
     /// An update tagged as a subagent's.
@@ -969,12 +979,10 @@ mod tests {
                 .unwrap()
                 .contains("StackQL Workbench")
         );
-        assert!(
-            blocks[1]["text"]
-                .as_str()
-                .unwrap()
-                .starts_with("Subagents:")
-        );
+        let guidance = blocks[1]["text"].as_str().unwrap();
+        assert!(guidance.starts_with("Subagents:"));
+        // What this agent needs to be told about its own subagents follows.
+        assert!(guidance.ends_with("- Use the plain kind of subagent."));
         assert_eq!(blocks[2]["text"], "how many providers?");
 
         // The agent's own line about disabled tools is not news.

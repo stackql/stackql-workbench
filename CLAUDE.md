@@ -311,7 +311,7 @@ What exists now under item 3 is the GitHub Copilot CLI. Every point was tested. 
 - Subagents are allowed, as a setting that is on by default. With it on, the CLI's `task` tool is added to `--available-tools`. A subagent gets the same tools as the agent that starts it, the engine's and `task`, and uses the same MCP server, so the same safety mode. That was tested: a subagent asked for a shell and for a file write had neither.
 - The first prompt tells the agent when to use subagents: independent lookups across providers, services or resources, never a change. That direction lives here because starting agents is the client's capability. The engine cannot start one.
 - A subagent's tool calls carry its id under `_meta["github.com/copilot"]`. The host marks each call with the subagent's name, shows the start of a subagent with its task, and keeps a subagent's own message text out of the conversation. A turn that starts more than 12 subagents is stopped. The CLI itself stops nesting at depth four.
-- The CLI chooses the model a subagent runs on. It was `gpt-6-luna` when tested, whatever the session's model. What that costs was not measured.
+- The CLI has three kinds of subagent. `general-purpose` has the engine's tools and runs on the session's model. `task` has them and runs on a model the CLI picks, `gpt-6-luna` when tested. `explore` has none of the engine's tools. None of the three has a shell or file access under this tool list. The first prompt asks for `general-purpose` in `sync` mode and rules out `explore` and background mode. That advice is in the Copilot profile, not in the general guidance. What subagents cost was not measured.
 
 These rules hold for every backend.
 

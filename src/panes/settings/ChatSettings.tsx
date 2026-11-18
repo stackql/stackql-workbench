@@ -273,9 +273,9 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
                   <span className="block text-ink-muted">
                     For a request that spans several providers, services or resources, the agent may
                     hand each part to a subagent and run them at the same time. A subagent gets the
-                    engine tools and nothing else, on the same engine and safety mode. The CLI
-                    chooses the model a subagent runs on, which can differ from the one above, and a
-                    turn that starts more than 12 is stopped.
+                    engine tools and nothing else, on the same engine and safety mode. It is asked
+                    to run on the model above, though the CLI can pick another for some kinds of
+                    subagent. A turn that starts more than 12 is stopped.
                   </span>
                 </span>
               </label>

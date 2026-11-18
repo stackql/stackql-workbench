@@ -25,6 +25,15 @@ pub const PROFILE: Profile = Profile {
     vendor_key: "github.com/copilot",
     // Without these the CLI gives a subagent's calls an id and no name.
     session_events: &["subagent.started"],
+    // The CLI has three kinds of subagent. Under the tool list this app
+    // gives it, the general-purpose kind has the engine's tools and runs on
+    // the model the operator chose, the task kind has them and runs on a
+    // model the CLI picks, and the explore kind has none of them. A
+    // subagent started in the background needs tools to be read back that
+    // the agent does not have here. All of it was tested.
+    subagent_hint: "- With the task tool here, set agent_type to general-purpose and mode to sync, \
+and start the subagents in the same step so that they run together.\n\
+- Do not use the explore agent type, which does not have the stackql tools, or background mode.",
 };
 
 /// The CLI's tool for starting a subagent. A subagent gets the same tools
@@ -269,6 +278,15 @@ mod tests {
         for forbidden in ["--allow-all", "--yolo", "--allow-all-tools", "--autopilot"] {
             assert!(!args.iter().any(|a| a == forbidden), "{forbidden} is set");
         }
+    }
+
+    #[test]
+    fn the_agent_is_told_which_kind_of_subagent_can_do_the_work() {
+        let hint = PROFILE.subagent_hint;
+        assert!(hint.contains("general-purpose"));
+        assert!(hint.contains("mode to sync"));
+        assert!(hint.contains("explore"));
+        assert!(hint.contains("background"));
     }
 
     #[test]

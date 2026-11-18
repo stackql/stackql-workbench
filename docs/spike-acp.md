@@ -75,7 +75,7 @@ These follow from the findings.
 
 ## Subagents
 
-This was tested on 18 November 2026, on the same versions, to see whether the CLI's subagents can be allowed without giving up the restriction to the engine. Two prompts were sent.
+This was tested on 18 November 2026, on the same versions, to see whether the CLI's subagents can be allowed without giving up the restriction to the engine. Three prompts were sent to the probe and one through the app.
 
 The CLI has a `task` tool that starts a subagent. It is one of the tools the restriction above turns off. Adding `task` to `--available-tools` brings it back and nothing else.
 
@@ -86,14 +86,27 @@ The CLI has a `task` tool that starts a subagent. It is one of the tools the res
 | How a start is reported | A `tool_call` whose `rawInput` has `agent_type: "task"`, with `name`, `description` and `prompt`. Its result, when the subagent is done, is the subagent's report |
 | How a subagent's work is reported | Its tool calls and message chunks are ordinary `session/update` messages that carry `_meta["github.com/copilot"].agentId`. The main agent's carry no `_meta` |
 | Naming a subagent | Asking for `subagent.started` at the handshake, under `clientCapabilities._meta["github.com/copilot"].events`, gives a `github.com/copilot/sessionEvent` notification with the `agentId`, a display name, the call that started it and the model |
-| Model | Subagents ran on `gpt-6-luna`, whatever the session's model was. The event says the choice is the agent definition's default |
+| Kinds of subagent | Three: `general-purpose`, `task` and `explore`. The model picks one with `agent_type`. See the table below |
 | Running together | Two subagents started in one step ran at the same time |
 | Nesting | A subagent can start subagents. One that could not do its job did so, and the CLI stopped it at depth four with `Maximum sub-agent depth of 4 reached` |
+
+The three kinds were each asked to run a shell command, to create a file, and to call an engine tool.
+
+| Kind | Shell | File write | Engine tools | Model |
+|---|---|---|---|---|
+| `general-purpose` | No | No | Yes | The session's model |
+| `task` | No | No | Yes | `gpt-6-luna`, the agent definition's default |
+| `explore` | No | No | No | `gpt-6-luna` |
+
+So the restriction holds for every kind, and only two of them are of use here. This matters in practice. Left to choose, the model once picked `explore` in background mode. Those subagents could not reach the engine, their results had to be read back with a tool the agent does not have under this tool list, and the main agent ended up doing the lookups itself. The answer was right and the subagents were wasted.
+
+A subagent that lacks a tool for its job tends to start a `task` subagent to try again, even when told not to. That is what the depth limit catches.
 
 What the host does with this:
 
 - Adds `task` to the tool list when subagents are on. That is a setting, on unless the operator turns it off.
 - Tells the agent in the first prompt when to use them: for independent lookups only, never for a change, no more than four at once, and not from inside a subagent.
+- Tells it how: `agent_type` `general-purpose`, `mode` `sync`, started in one step so they run together, and not the `explore` kind or background mode.
 - Shows the start of a subagent with its task, and marks each tool call with the subagent that made it.
 - Leaves a subagent's own message text out of the conversation. It arrives whole as the result of the call that started the subagent.
 - Stops a turn that starts more than 12 subagents, and says why.
@@ -107,7 +120,7 @@ These are known and accepted for now.
 - The CLI keeps its own session history, so Workbench conversations appear there.
 - A different ACP agent needs its own launcher. How the engine's MCP server is handed over, and how tools are restricted, is specific to each agent.
 - What subagents cost was not measured. `--usage-output-file` cannot be combined with `--acp`. The CLI's help says subagents count on usage-based billing, and that on request-based billing a prompt costs one request.
-- The model a subagent runs on cannot be chosen over ACP.
+- The model a subagent runs on cannot be set over ACP. Asking for the `general-purpose` kind gets the session's model. The agent can still choose another kind.
 - ACP support in the Copilot CLI is in public preview.
 
 ## Open questions
