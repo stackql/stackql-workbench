@@ -181,7 +181,14 @@ const PARAM_LABEL: Record<string, string> = {
   output: 'output',
 };
 
-const isOutput = (field: MethodField) => field.paramType === 'output';
+/**
+ * Whether a field is something a statement supplies. The engine marks those
+ * `input_required` or `input_optional`. What it returns is marked `output`
+ * by most providers and `response` by the built-in one, so anything that
+ * is not an input counts as an output.
+ */
+const isInput = (field: MethodField) => field.paramType.startsWith('input');
+const isOutput = (field: MethodField) => !isInput(field);
 
 /**
  * The nodes for a method's fields: required inputs, optional inputs, then
@@ -190,7 +197,7 @@ const isOutput = (field: MethodField) => field.paramType === 'output';
  */
 export function paramNodes(path: NodePath, fields: MethodField[]): TreeNode[] {
   const name = qualifiedName(path);
-  const rank = (field: MethodField) => PARAM_ORDER[field.paramType] ?? 3;
+  const rank = (field: MethodField) => PARAM_ORDER[field.paramType] ?? 2;
   return fields
     .map((field, position) => ({ field, position }))
     .sort((a, b) => rank(a.field) - rank(b.field) || a.position - b.position)
@@ -217,7 +224,7 @@ export function paramNodes(path: NodePath, fields: MethodField[]): TreeNode[] {
  */
 export function methodGroupNodes(path: NodePath, fields: MethodField[]): TreeNode[] {
   const name = qualifiedName(path);
-  const inputs = fields.filter((field) => !isOutput(field));
+  const inputs = fields.filter(isInput);
   const outputs = fields.filter(isOutput);
   const required = inputs.filter((field) => field.paramType === 'input_required').length;
   return [

@@ -150,6 +150,21 @@ describe('nodes', () => {
     expect(inputs?.id).not.toBe(outputs?.id);
   });
 
+  it('counts a field the engine calls a response as an output', () => {
+    // The provider built into the engine marks what a method returns as
+    // `response`, where the others say `output`.
+    const path = { provider: 'a', service: 'b', resource: 'c', method: 'm' };
+    const [inputs, outputs] = methodGroupNodes(path, [
+      { name: 'vpc_id', type: 'string', paramType: 'response', shape: '', description: '' },
+      { name: 'region', type: 'string', paramType: 'input_optional', shape: '', description: '' },
+      { name: 'cidr', type: 'string', paramType: 'response', shape: '', description: '' },
+    ]);
+    expect(inputs?.children?.map((n) => n.label)).toEqual(['region']);
+    expect(inputs?.detail).toBe('1, 0 required');
+    expect(outputs?.children?.map((n) => n.label)).toEqual(['vpc_id', 'cidr']);
+    expect(outputs?.children?.map((n) => n.detail)).toEqual(['string', 'string']);
+  });
+
   it('shows an empty group as one that cannot be opened', () => {
     const path = { provider: 'a', service: 'b', resource: 'c', method: 'm' };
     const [inputs, outputs] = methodGroupNodes(path, [
