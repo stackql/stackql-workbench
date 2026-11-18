@@ -91,12 +91,11 @@ export function ToolCard({ item, onOpenInEditor, onShowTable, onAnswer }: ToolCa
           )}
 
           {item.engineNotes.length > 0 && (
-            <div className="mt-1 flex items-start gap-1.5 text-warn">
-              <Warning className="mt-0.5 shrink-0" />
+            <div className="mt-1 flex items-start gap-1.5 text-ink-muted">
               <div className="min-w-0">
                 <div>
-                  While this ran, a provider answered a call with the message below. An empty or
-                  short result can mean nothing matched, or that the call did not succeed.
+                  A provider answered a call with this while the statement ran. The assistant was
+                  given the result above and not this message.
                 </div>
                 {item.engineNotes.map((note, index) => (
                   <div

@@ -209,7 +209,7 @@ How the host uses it:
 - The editor has one long-lived session. Each explorer statement gets its own short-lived session.
 - The explorer is built from metadata statements: `SHOW PROVIDERS`, `SHOW EXTENDED SERVICES IN`, `SHOW EXTENDED RESOURCES IN`, `SHOW EXTENDED METHODS IN`, `DESCRIBE EXTENDED` and `DESCRIBE METHOD EXTENDED`. Results are mapped by column name, not position.
 - Identifiers are validated and written in double quotes. This engine version rejects backticks. Never build statements by raw string interpolation of UI input.
-- A zero-row result that comes with a notice is shown with the notice beside it, not as plain "no data". The notice is what the provider answered. The UI passes it on and does not rule on it. See Empty results.
+- A zero-row result that comes with a notice is shown with the notice beside it, not as plain "no data". The notice is what the provider answered. The UI passes it on and does not rule on it. See Provider errors and empty results.
 
 ### `stackql mcp` (agent channel)
 
@@ -228,7 +228,7 @@ How the server behaves:
 - Every protocol revision the SDK offers is negotiated. The host offers `2025-11-25`, the newest one with an `initialize` handshake. On it the approval prompt is a server-initiated elicitation, the simpler of the two approval flows.
 - 15 tools. Each result carries rendered text for the model and a structured payload. Row results are `{ "rows": [...] }`, which the host turns into a table for the grid. Nothing needs to be set to get JSON: the structured payload is always there.
 - The handshake returns about 25,000 characters of guidance for the model. The host puts it in the system prompt.
-- A provider call that returns nothing gives the model an empty result with no error, whatever the reason. What the provider said is only on the server's stderr. The host watches stderr during each tool call and passes a note on to the operator and the model. That is best effort: it knows one HTTP line, and it is absent when a delegated agent owns the server's stderr. See Empty results.
+- A provider call that fails comes back as a tool error: `upstream http error: {"http_status": 401, "retryable": false}: ...`. A lookup that finds nothing comes back as an empty result with no error, and what the provider said is on the server's stderr. The server's instructions tell a model how to read each. The host shows the stderr line to the operator beside the tool result and adds nothing to what the model receives. See Provider errors and empty results.
 - A statement the server cannot parse is classed `unknown` and asks for approval, even through the read tool.
 - The server exits when its stdin closes.
 
@@ -251,14 +251,15 @@ The workspace safety setting maps directly onto `server.mode`.
 
 The request is a form with no fields. Its message holds the tool, the query class and the SQL. The host waits for the operator for as long as it takes. With nobody listening the answer is decline, and stopping the turn answers cancel.
 
-### Empty results
+### Provider errors and empty results
 
-This was decided by the maintainer on 18 November 2026. Do not reopen it.
+Where this is handled was decided by the maintainer on 18 November 2026: in the engine, not in this app. Do not add logic for it here.
 
-- The engine answers a provider call that returned nothing with an empty, successful result, on both channels. That stays. A lookup of one thing that does not exist is an ordinary question, and "not found" is its answer, not a failure of the statement.
-- The engine reaches providers over more than one protocol, gRPC among them. Nothing in the host or the UI may sort a provider's answer by HTTP status code, or call an answer a failure because of one.
-- What the host and the UI do is pass the provider's message on, where there is one, in neutral words: nothing may have matched, or the call may not have succeeded.
-- For a model the fix is instructions, not an error. The text is `empty_result_guidance!` in `src-tauri/src/agent/mod.rs`, used for both the host's loop and a delegated agent. It says what an empty result does and does not show, and to check that the provider is answering before reporting that it has none of something or acting on something being absent. The engine's own MCP instructions are the long-term home for this, and the text here should follow theirs once they carry it.
+- On the agent channel the engine's MCP server already handles it. It runs statements with strict upstream errors, so a provider call that fails is a tool error carrying the status and whether a retry can help. A lookup that finds nothing is an empty result, because "not found" is a valid answer. The server's instructions tell a model how to read each. They are in `pkg/mcp_server/content/instructions/06-errors.md` in the stackql repository.
+- That was checked against v1.0.888 with no provider credentials in the environment. A call that needs a sign-in returned the tool error. A list for an owner that does not exist returned no rows.
+- On the human channel `srv` answers a provider call that returned nothing with an empty, successful result, and with `--pgsrv.debug.enable` a notice carries what the provider said. That stays. The server cannot fail a statement because a lookup found nothing, and the engine reaches providers over more than one protocol, gRPC among them.
+- This app passes on what the engine says and adds nothing. It does not sort a provider's answer by status code, does not call an answer a failure, and does not add to or change what a model is told about a result. If something seems to need that, the change belongs in the engine's MCP server.
+- An earlier version of this file, and of `docs/spike-mcp.md`, said the MCP server hides provider failures from the model. That was wrong. It came from testing one lookup that found nothing and taking it for every kind of failure. Test more than one case before recording an engine behaviour, and read the engine's source when it is to hand.
 
 ### Credentials
 
@@ -302,7 +303,7 @@ What exists now under item 3 is the GitHub Copilot CLI. Every point was tested. 
 - The workspace safety mode is passed to the engine as for the other backends. The CLI does not relay MCP elicitation, so the engine refuses a statement that needs approval instead of asking. It fails closed. Do not put a gate of the host's own in its place.
 - A `session/request_permission` from the agent is declined and the operator is told. None is expected, and one means the agent is reaching for something outside the engine.
 - The model is chosen with `session/set_config_option`. Empty leaves the CLI's own choice. The settings pane lists the models with what each costs against the operator's plan.
-- The engine's stderr goes to the CLI, so the note about a failed provider call is missing on this path.
+- The engine's stderr goes to the CLI, so the operator is not shown what a provider said when a lookup found nothing. Errors are not affected: they come back as tool errors on this path as on the other.
 
 These rules hold for every backend.
 

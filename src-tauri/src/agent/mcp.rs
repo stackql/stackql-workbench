@@ -23,13 +23,17 @@ use crate::connection::{AgentChannel, LogBuffer};
 use crate::error::{HostError, HostResult};
 use crate::util::truncate;
 
-/// The marker the engine puts on a stderr line when a provider answers an
-/// HTTP call with something other than success. The result of such a call
-/// is empty, and this line is the only trace of what was said.
+/// The marker on a line the engine writes to stderr with what a provider
+/// answered. It is shown to the operator beside the tool result and goes
+/// nowhere else.
 ///
-/// This is best effort. It knows only this one line, so a provider reached
-/// over another protocol leaves no note, and it does not judge the answer:
-/// "not found" for a lookup of one thing is an ordinary answer.
+/// The engine's MCP server deals with provider errors itself. A call that
+/// fails comes back as a tool error with the status and whether a retry can
+/// help. A lookup that finds nothing comes back as an empty result, because
+/// "not found" is a valid answer, and what the provider said is left on
+/// stderr. That last line is what this picks up. It is a display of the
+/// engine's own output, not a judgement: nothing here decides that a call
+/// failed, and nothing is added to what the model receives.
 const UPSTREAM_FAILURE_MARKER: &str = "http response status code:";
 const MAX_NOTE_CHARS: usize = 400;
 const MAX_NOTES: usize = 5;

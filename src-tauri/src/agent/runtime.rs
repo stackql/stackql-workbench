@@ -43,8 +43,7 @@ pub(super) const MAX_UI_TEXT_CHARS: usize = 6_000;
 /// Rows beyond this are not sent to the webview for one tool result.
 const MAX_UI_ROWS: usize = 5_000;
 
-const PREAMBLE: &str = concat!(
-    "You are the assistant inside StackQL Workbench, a desktop tool for querying \
+const PREAMBLE: &str = "You are the assistant inside StackQL Workbench, a desktop tool for querying \
 cloud and SaaS providers with SQL through a local StackQL engine. You work through the tools \
 provided, which run against that engine.\n\n\
 How to work here:\n\
@@ -53,14 +52,10 @@ what you found instead of repeating large tables.\n\
 - When you run or propose a statement, show the SQL.\n\
 - Statements that change something may need the operator's approval. The tool asks for it. If the \
 operator declines, do not try again or look for another way to make the same change. Say what \
-you would have done and stop.\n",
-    empty_result_guidance!(),
-    "- When a tool result carries a note from the engine about what a provider answered, tell \
-the operator what it says.\n\
+you would have done and stop.\n\
 - You never see credentials and you do not need them. If a provider reports missing credentials, \
 tell the operator which provider needs them.\n\n\
-The engine's own guidance follows.\n\n"
-);
+The engine's own guidance follows. It says how errors and empty results are to be read.\n\n";
 
 /// A row result, in the same shape the editor's grid uses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -624,8 +619,14 @@ fn add_usage(total: Usage, step: Usage) -> Usage {
 }
 
 /// The tool result as the model receives it: the server's rendering, cut if
-/// it is very long, plus a note when the engine reported a failed provider
-/// call. Without the note the model would read a failed call as "no data".
+/// it is very long. Nothing is added to it.
+///
+/// How a result is to be read is the engine's to say, an error or an empty
+/// result included. Its MCP server returns a provider call that fails as a
+/// tool error, returns a lookup that finds nothing as an empty result, and
+/// tells the model how to treat each in the guidance it sends. A note from
+/// this app on top of that would be a second opinion on the engine's own
+/// answer.
 pub fn content_for_model(result: &ToolResult) -> String {
     let mut text = if result.text.trim().is_empty() {
         result
@@ -642,17 +643,6 @@ pub fn content_for_model(result: &ToolResult) -> String {
             "\n\n[Output cut: {} more characters. Narrow the query or select fewer columns.]",
             length - MAX_MODEL_CHARS
         ));
-    }
-    if !result.engine_notes.is_empty() {
-        text.push_str(
-            "\n\nNote from the engine: while this ran, a provider answered a call with the \
-             message below. An empty or short result can mean nothing matched, or that the call \
-             did not succeed.",
-        );
-        for note in &result.engine_notes {
-            text.push_str("\n- ");
-            text.push_str(note);
-        }
     }
     text
 }
@@ -778,17 +768,16 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_provider_call_is_pointed_out_to_the_model() {
+    fn the_model_is_told_what_the_engine_said_and_nothing_more() {
+        // What a provider answered is shown to the operator. It is not added
+        // to what the model receives: the engine has already decided what
+        // the model is told about this result.
         let text = content_for_model(&result(
             "**no results**",
             Some(json!({ "rows": [] })),
             &["http response status code: 404, response body: Not Found"],
         ));
-        assert!(text.starts_with("**no results**"));
-        assert!(text.contains("a provider answered a call"));
-        // The note passes on what was said. It does not rule on it.
-        assert!(text.contains("can mean nothing matched, or that the call did not succeed"));
-        assert!(text.contains("http response status code: 404"));
+        assert_eq!(text, "**no results**");
     }
 
     #[test]
@@ -824,21 +813,6 @@ mod tests {
             add_usage(Usage::default(), Usage::default()),
             Usage::default()
         );
-    }
-
-    #[test]
-    fn both_prompts_carry_the_same_guidance_on_empty_results() {
-        let guidance = empty_result_guidance!();
-        assert!(PREAMBLE.contains(guidance));
-        assert!(crate::agent::delegate::PRIMER.contains(guidance));
-        assert!(guidance.contains("returned no rows"));
-        assert!(guidance.contains("unconfirmed"));
-        // The engine reaches providers over more than one protocol. The
-        // guidance must not lean on one of them.
-        let lower = guidance.to_lowercase();
-        for word in ["http", "grpc", "status code", "404", "401"] {
-            assert!(!lower.contains(word), "the guidance names {word}");
-        }
     }
 
     #[test]

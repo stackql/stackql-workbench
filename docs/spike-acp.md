@@ -78,7 +78,7 @@ These follow from the findings.
 These are known and accepted for now.
 
 - No approval card with this backend. See above.
-- The engine's stderr goes to the CLI, not to the host, so the note the host adds when a provider API call fails is missing. An upstream failure looks like an empty result.
+- The engine's stderr goes to the CLI, not to the host, so the operator is not shown what a provider said when a lookup found nothing. A call that fails is not affected: the engine returns it as a tool error, which the CLI passes on.
 - The CLI keeps its own session history, so Workbench conversations appear there.
 - A different ACP agent needs its own launcher. How the engine's MCP server is handed over, and how tools are restricted, is specific to each agent.
 - ACP support in the Copilot CLI is in public preview.

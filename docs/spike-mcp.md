@@ -32,7 +32,7 @@ Each row is something the agent runtime relies on.
 | What do tools return? | Rendered text for the model and a structured payload for programs. Row results are `{ "rows": [ { column: value } ] }` |
 | How does approval arrive? | As a form elicitation whose message holds the tool, the query class and the exact SQL. The schema has no fields. Accept, decline and cancel all behave as documented |
 | What if the client does not advertise elicitation? | Gated tools are refused with a message pointing at `full_access` |
-| Upstream provider failures | **Hidden from the model.** The tool returns "no results" with no error. The reason is only on the server's stderr |
+| Provider calls that do not succeed | A call that fails is a tool error with the status and a `retryable` flag. A lookup that finds nothing is "no results" with no error, by design, and what the provider said is on the server's stderr. This row first said failures were hidden from the model. See the correction below |
 | Audit log | JSONL, one record per tool call, in the directory given by `server.audit.file.dir` |
 | Shutdown | The server exits with code 0 when its stdin closes |
 
@@ -141,7 +141,7 @@ A tool error is a normal result with `is_error` set and the reason in the text. 
     is_error=Some(true) text="tool \"run_select_query\" refused: mutation_delete statements run through run_mutation_query or run_lifecycle_operation"
 ```
 
-An upstream provider failure is not an error at all. The statement below asked a provider API for something that does not exist and got HTTP 404. The model is told there were no results.
+A lookup that finds nothing is not an error. The statement below asked a provider API for something that does not exist and got HTTP 404. The model is told there were no results.
 
 ```
 > run_select_query {"sql":"SELECT name FROM homebrew.formula.formula WHERE formula_name = 'no-such-formula-xyz-123'"}
@@ -152,7 +152,27 @@ server stderr:
   http response status code: 404, response body: <!DOCTYPE html> ...
 ```
 
-This is the same behaviour found on the pg wire channel, and here it reaches a model that will reason from it. The host therefore watches the server's stderr during each tool call. When a line reporting an HTTP status appears, the host shows it to the operator beside the tool result and appends a short note to the text the model receives, so that an empty result caused by a failed call is not read as "there is nothing there".
+That is the intended answer. The engine's instructions to a model say that an empty result for something that may or may not exist means "not found", a valid answer.
+
+### Correction, 18 November 2026
+
+This section first concluded that the MCP server hides provider failures from the model, and the host was given a workaround that added a note to the model's tool result. Both were wrong. The conclusion came from the one case above.
+
+A second case was tested later against the same engine version, with no provider credentials in the environment:
+
+```
+> run_select_query {"sql":"SELECT login FROM github.users.users"}
+    is_error=true
+    text="upstream http error: {\"http_status\": 401, \"retryable\": false}: httpx: request to
+          https://api.github.com/user failed: status 401: {\"message\":\"Requires authentication\", ...}"
+
+> run_select_query {"sql":"SELECT name FROM github.repos.repos WHERE org = 'no-such-org-xyz-123-abc'"}
+    is_error=false text="**no results**"
+    structured={"rows":[]}
+    server stderr: http response status code: 404, response body: {"message":"Not Found", ...}
+```
+
+So a call that fails is a tool error, with the status and whether a retry can help, and only a lookup that finds nothing is an empty result. The engine source says the same: the MCP backend runs statements with strict upstream errors and classifies them. The workaround was removed. The host still shows the stderr line to the operator beside the tool result, and adds nothing to what the model receives.
 
 ## Approval
 
@@ -211,6 +231,6 @@ The supervisor still kills the process if it is alive after that, and the job ob
 
 ## Open items for the maintainer
 
-- A provider call that returns nothing reaches the model as an empty result. The host adds a note from stderr. This report first suggested an error result from the server. The maintainer has since decided against that: an empty result is the right answer to a lookup of something that does not exist, and the engine does not sort provider answers by status code. The fix is instructions for the model. See Empty results in `CLAUDE.md`.
+- Nothing is open on provider errors. The first version of this report asked for an error result from the server, which it already gives. See the correction above.
 - Row objects lose the column order of the statement.
 - The `list_*` tool schemas do not mark their required arguments.

@@ -443,6 +443,6 @@ These came out of the spike and need an engine-side answer.
 - Dropping statements after the first, with no error, looks like a defect in `srv`. The host works around it by splitting.
 - `srv` cuts a message at the first semicolon even inside a string literal, so a literal containing a semicolon cannot be sent. There is no host-side workaround.
 - The per-connection notice buffer is never cleared. The host works around it, but a fix in the engine would be cleaner.
-- A provider call that returns nothing gives success with zero rows, which is easy to misread. This report first suggested an error. The maintainer has since decided the behaviour stays: an empty result is the right answer to a lookup of something that does not exist. The host shows the notice beside the empty result and does not rule on it. See Empty results in `CLAUDE.md`.
+- A provider call that returns nothing gives success with zero rows, which is easy to misread. This report first suggested an error. The maintainer has since decided the behaviour stays: an empty result is the right answer to a lookup of something that does not exist. The host shows the notice beside the empty result and does not rule on it. See Provider errors and empty results in `CLAUDE.md`.
 - `NULL` arrives as an empty string.
 - Whether `SET SESSION` is scoped to the connection was not verified.
