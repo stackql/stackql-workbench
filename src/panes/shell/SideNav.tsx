@@ -37,14 +37,14 @@ export function SideNav({
       }`}
     >
       <div className="flex flex-col gap-0.5 p-1.5">
-        <div className="flex h-8 items-center gap-2">
+        <div className="mb-1 flex h-10 items-center gap-2">
           <Item
             icon={<Sidebar />}
             label={collapsed ? 'Show menu' : 'Hide menu'}
             collapsed
             onClick={onToggle}
           />
-          {!collapsed && <Wordmark className="h-[13px] w-auto shrink-0 text-accent" />}
+          {!collapsed && <Wordmark className="h-5 w-auto shrink-0 text-accent" />}
         </div>
         <Item
           icon={<NewChat />}
