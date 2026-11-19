@@ -206,7 +206,7 @@ To try it:
 
 - Download the artifact from the run's page on GitHub, which needs a GitHub sign-in, and open the disk image inside it.
 - Drag the app to Applications. macOS refuses to open it the first time. Allow it under System Settings, Privacy & Security, with Open Anyway. The other way is `xattr -dr com.apple.quarantine "/Applications/StackQL Workbench.app"` in a terminal.
-- Install the `stackql` CLI. The app looks in `/usr/local/bin` and `/opt/homebrew/bin`. If it is somewhere else, set its path under Settings.
+- Install the `stackql` CLI from the PKG on the [release page](https://github.com/stackql/stackql/releases/latest). Homebrew has v0.12.824, which is older than the v1.0.888 this app is built and tested against. The app looks in `/usr/local/bin`, where the PKG puts it, and then in `/opt/homebrew/bin`. If it is somewhere else, set its path under Settings.
 - An app started from Finder does not see variables exported in a shell profile. For provider credentials, set a dotenv file under Settings.
 
 The same build on a Mac is `npm run tauri build -- --target universal-apple-darwin --bundles app,dmg`, after `rustup target add aarch64-apple-darwin x86_64-apple-darwin`.

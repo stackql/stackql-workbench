@@ -43,6 +43,20 @@ jobs:
       # skipped. They use metadata statements and the built-in provider only:
       # no credentials and no provider downloads.
       - uses: stackql/setup-stackql@v2
+        if: runner.os != 'macOS'
+
+      # On macOS the setup action installs with Homebrew, which has v0.12.824.
+      # The tests rely on the current release, so the release package is
+      # installed instead. It puts stackql in /usr/local/bin.
+      - name: Install stackql from the release package (macOS)
+        if: runner.os == 'macOS'
+        working-directory: ${{ runner.temp }}
+        run: |
+          base=https://github.com/stackql/stackql/releases/latest/download
+          curl -fsSL -O "$base/stackql_darwin_multiarch.pkg"
+          curl -fsSL -O "$base/stackql_darwin_multiarch.pkg.sha256"
+          shasum -a 256 -c stackql_darwin_multiarch.pkg.sha256
+          sudo installer -pkg stackql_darwin_multiarch.pkg -target /
 
       - name: Tool versions
         shell: bash
