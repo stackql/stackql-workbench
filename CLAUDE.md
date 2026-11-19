@@ -34,6 +34,7 @@ What has and has not been run:
 - The explorer, completion, history, export through the save dialog, the activity filters, the theme choice and the query library were each driven in the built app on Windows. The "Copy as CLI" commands were run in Windows PowerShell 5.1 and PowerShell 7 against the real engine. The POSIX form was checked in a shell under WSL with a stand-in program, not on macOS.
 - The Help menu's links have not been opened by a test. The address each one opens is tested. Help > Show Log File has not been clicked either, since it opens a window on the desktop. The log file it shows was read after real turns.
 - The conversation layout, the charts and the sortable table were driven in the built app on Windows in both themes, with a scripted model against the real engine: a declined approval, a call that failed and was not listed, each chart type, a chart that could not be drawn, sorting, and a CSV saved through the save dialog. Two turns were then run for real through the Copilot CLI 1.0.114 on `claude-haiku-4.5`. In the first the model wrote a chart block from the guidance on its first try. In the second three of its calls failed on the way: none was listed, and all three were in the log with their statement or arguments. No API key backend has drawn a chart from a real model.
+- Which engine an installed app starts was checked on Windows with a build of the app and a copy of `stackql.exe` in one folder, the way the MSI lays them out. With nothing set it started the engine beside it. With `STACKQL_BIN` naming another engine, and with it pointing nowhere, it still did, and said the variable was not used. With a path in settings it started that engine, and with a path in settings that pointed nowhere it stopped with the reason. The folder was one an ordinary account can write to, so the fallback of the data folder under `Program Files` was not part of this. The macOS rule has run only as unit tests.
 - The token counts were seen in the built app with a scripted model, and for real through the Copilot CLI: one prompt to a probe to see what the CLI sends, and one turn through the app, which showed the count on the steps line and in the log. The counts of Gemini, Anthropic and an OpenAI-compatible server are read as their documentation describes and tested against stubs, not against the real services.
 - The supervisor's tests see a child end by waiting on a handle to it on Windows, and with `kill -0` on Unix. They used to ask `tasklist`, which on a busy machine could use up the time a test allowed. They passed 30 runs in a row with every core busy. With twice as many busy loops as cores a different test, `an_unexpected_exit_is_reported_with_its_code`, missed its 10 second limit twice in 30 runs.
 
@@ -179,14 +180,24 @@ The facts in this section were read from `stackql` `main` in November 2026, and 
 Resolve the `stackql` binary in this order and stop at the first hit.
 
 1. Explicit path in settings
-2. `STACKQL_BIN` environment variable
-3. Sibling of the Workbench executable
+2. The engine installed with the app
+3. `STACKQL_BIN` environment variable
 4. Well-known install locations for the platform
 5. `PATH`
 
 Show the resolved path and version in the UI. If nothing is found, say so plainly and point at the settings field.
 
-The two explicit sources are strict. If the settings path or `STACKQL_BIN` is set and does not point to a file, that is an error and the search stops there. Running a different binary than the one the operator named would be worse than stopping.
+The engine installed with the app is the default. The maintainer decided that on 19 November 2026, for the MSI and then for macOS: the installers ship the two together, and that pair is the one built and tested together. Only a path in settings comes before it, because that is a choice the operator can only make after the install. `STACKQL_BIN` used to come second. It now comes after, since a variable can be older than the install and would swap the engine without anyone choosing that. When the variable is set and passed over, the status says so, and a variable that points nowhere does not stop the installed engine from starting.
+
+What "installed with the app" means differs by platform, because the installers lay the pair out differently.
+
+- Windows: `stackql.exe` in the same folder as the Workbench executable. That is where the MSI puts it.
+- macOS: for an app that runs from a bundle, an engine inside the bundle beside the executable, and failing that `/usr/local/bin/stackql`, which is where the PKG puts the command. The PKG does not put an engine inside the bundle today. If a later one does, that one is found first.
+- A build from this repository has no engine beside it and, on macOS, is not in a bundle. It has no installer behind it, so there the variable is still the next thing tried.
+
+On an Intel Mac the common package manager also links its `stackql` into `/usr/local/bin`. The app cannot tell that one from the PKG's. Whichever is at that path is taken as the installed engine, as it was the first place looked before this change.
+
+The two explicit sources are strict when they are reached. If the settings path is set and does not point to a file, or `STACKQL_BIN` is the source in turn and does not, that is an error and the search stops there. Running a different binary than the one the operator named would be worse than stopping.
 
 ### Process lifecycle
 

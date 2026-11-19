@@ -286,6 +286,8 @@ Milestones are delivered in order where they depend on each other. Each one leav
 StackQL Workbench has no installer of its own. It ships inside the StackQL installers, beside the `stackql` binary.
 
 - Windows: the StackQL MSI installs `stackql-workbench.exe` next to `stackql.exe` and adds a Start Menu entry. The app needs the Microsoft WebView2 runtime, which is present on Windows 11.
+- The app uses the `stackql` it was installed with: on Windows the one that sits beside it, and on macOS the command the PKG puts in `/usr/local/bin`, or an engine inside the app bundle if the PKG ever puts one there. That is the pair that was built and tested together, so nothing on the machine replaces it except a path the operator sets under Settings after the install. A `STACKQL_BIN` variable does not, and when one is set the status bar says it is not used. Neither installer has anything to configure for this.
+- Under `Program Files` the folder beside the app cannot be written to, so the engine keeps its provider cache in the app data directory. A first run lists no providers.
 - macOS: the StackQL PKG installs `StackQL Workbench.app` to `/Applications` alongside the `stackql` CLI.
 - Bundle identifier: `io.stackql.workbench`.
 - This repository builds the per-platform artefacts. The StackQL release workflow consumes a pinned Workbench version.
