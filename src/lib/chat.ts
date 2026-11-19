@@ -24,6 +24,11 @@ export interface ToolItem {
   tool: string;
   /** The subagent that made the call. Null for the main agent. */
   agent: string | null;
+  /**
+   * Which of the model's steps in the turn asked for the call. Calls of one
+   * step were asked for together. Null for a call the host never announced.
+   */
+  step: number | null;
   /** The statement, when the tool takes one. Always shown as SQL. */
   sql: string | null;
   arguments: unknown;
@@ -136,6 +141,7 @@ export function applyAgentEvent(state: ChatState, event: AgentEvent): ChatState 
         callId: event.data.id,
         tool: event.data.tool,
         agent: event.data.agent ?? null,
+        step: event.data.step,
         sql: event.data.sql,
         arguments: event.data.arguments,
         status: 'running',
@@ -170,6 +176,7 @@ export function applyAgentEvent(state: ChatState, event: AgentEvent): ChatState 
           callId: event.data.request.id,
           tool: event.data.request.tool ?? 'approval',
           agent: null,
+          step: null,
           sql: event.data.request.sql,
           arguments: {},
           status: 'running',
@@ -303,27 +310,53 @@ export function chatProgress(state: ChatState): number {
 }
 
 export type Segment =
-  { kind: 'text'; text: string } | { kind: 'code'; language: string; code: string };
+  | { kind: 'text'; text: string }
+  | {
+      kind: 'code';
+      language: string;
+      code: string;
+      /** The closing fence has not arrived: the block is still being written. */
+      open?: boolean;
+    };
+
+/** A fence that opens and is not closed before the text ends. */
+const OPEN_FENCE = /```([A-Za-z0-9_+-]*)(?:[ \t]*\r?\n([\s\S]*))?$/;
 
 /**
  * Splits assistant text into prose and fenced code blocks, so that SQL the
- * model proposes can be shown as code and opened in the editor.
+ * model proposes can be shown as code and opened in the editor, and a chart
+ * block can be drawn.
+ *
+ * A reply arrives in pieces. A fence that is open at the end of the text is
+ * a block still being written, and is marked as such, so that half a block
+ * is never shown as prose.
  */
 export function splitFences(text: string): Segment[] {
   const segments: Segment[] = [];
+  const pushText = (prose: string) => {
+    if (prose.trim() !== '') {
+      segments.push({ kind: 'text', text: prose.trim() });
+    }
+  };
   const fence = /```([A-Za-z0-9_+-]*)[ \t]*\r?\n([\s\S]*?)(?:\r?\n)?```/g;
   let last = 0;
   for (const match of text.matchAll(fence)) {
-    const before = text.slice(last, match.index);
-    if (before.trim() !== '') {
-      segments.push({ kind: 'text', text: before.trim() });
-    }
+    pushText(text.slice(last, match.index));
     segments.push({ kind: 'code', language: (match[1] ?? '').toLowerCase(), code: match[2] ?? '' });
     last = match.index + match[0].length;
   }
   const rest = text.slice(last);
-  if (rest.trim() !== '') {
-    segments.push({ kind: 'text', text: rest.trim() });
+  const open = OPEN_FENCE.exec(rest);
+  if (open) {
+    pushText(rest.slice(0, open.index));
+    segments.push({
+      kind: 'code',
+      language: (open[1] ?? '').toLowerCase(),
+      code: open[2] ?? '',
+      open: true,
+    });
+  } else {
+    pushText(rest);
   }
   return segments;
 }

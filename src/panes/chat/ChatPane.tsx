@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Ref } from 'react';
+import { useEffect, useMemo, useRef, useState, type Ref } from 'react';
 import type { AgentConfig, SafetyMode } from '../../host/types';
 import {
   SAFETY_MODES,
@@ -10,11 +10,13 @@ import {
   type ChatState,
   type ToolItem,
 } from '../../lib/chat';
+import { conversationBlocks, type Block } from '../../lib/conversation';
 import { IconButton } from '../../ui/IconButton';
 import { ArrowUp, Bot, ErrorMark, NewChat, Shield, Spinner, Stop, Warning } from '../../ui/icons';
 import { AssistantText } from './AssistantText';
+import { ResultCard } from './ResultCard';
 import { SessionChips } from './SessionChips';
-import { ToolCard } from './ToolCard';
+import { Steps } from './Steps';
 
 const BACKEND_LABEL: Record<string, string> = {
   gemini: 'Gemini',
@@ -62,6 +64,8 @@ export function ChatPane({
   const waiting = pendingApprovals(chat).length > 0;
   const empty = chat.items.length === 0;
   const progress = chatProgress(chat);
+  const blocks = useMemo(() => conversationBlocks(chat), [chat]);
+  const backend = useMemo(() => backendOf(config), [config]);
 
   // Keep the newest text in view as the turn progresses.
   useEffect(() => {
@@ -136,17 +140,18 @@ export function ChatPane({
 
       <div className="min-h-0 flex-1 overflow-auto" role="log" aria-label="Conversation">
         <div className="mx-auto flex w-full max-w-[860px] flex-col gap-3 px-6 py-3">
-          {chat.items.map((item) => (
-            <Item
-              key={item.key}
-              item={item}
-              backend={backendOf(config)}
+          {blocks.map((block) => (
+            <BlockView
+              key={block.key}
+              block={block}
+              backend={backend}
               onOpenInEditor={onOpenInEditor}
               onShowTable={onShowTable}
               onAnswer={onAnswer}
             />
           ))}
-          {chat.busy && !waiting && (
+          {/* The steps say what is running. Before the first step there is only this. */}
+          {chat.busy && !blocks.some((block) => block.kind === 'steps' && block.active) && (
             <div className="flex items-center gap-2 text-ink-muted">
               <Spinner /> Working
             </div>
@@ -313,8 +318,8 @@ function Composer({
   );
 }
 
-interface ItemProps {
-  item: ChatItem;
+interface BlockViewProps {
+  block: Block;
   /** The backend and model in use, for a session the host opened itself. */
   backend: { name: string; model: string; delegated: boolean };
   onOpenInEditor: (sql: string) => void;
@@ -322,24 +327,67 @@ interface ItemProps {
   onAnswer: (approvalId: string, decision: 'accept' | 'decline') => void;
 }
 
-function Item({ item, backend, onOpenInEditor, onShowTable, onAnswer }: ItemProps) {
+/** One block of the conversation. See `lib/conversation.ts` for how it is laid out. */
+function BlockView({ block, backend, onOpenInEditor, onShowTable, onAnswer }: BlockViewProps) {
+  switch (block.kind) {
+    case 'item':
+      return <Item item={block.item} backend={backend} />;
+    case 'steps':
+      return (
+        <Steps
+          block={block}
+          onOpenInEditor={onOpenInEditor}
+          onAnswer={onAnswer}
+          renderNote={(step) => (
+            <AssistantText
+              text={step.text}
+              onOpenInEditor={onOpenInEditor}
+              charts={{ tables: step.tables, onShowTable }}
+            />
+          )}
+        />
+      );
+    case 'result': {
+      const { item } = block;
+      if (item.table === null) {
+        return null;
+      }
+      return (
+        <ResultCard
+          columns={item.table.columns}
+          rows={item.table.rows}
+          totalRows={item.table.totalRows}
+          sql={item.sql}
+          onOpenInEditor={onOpenInEditor}
+          onOpenGrid={() => {
+            onShowTable(item);
+          }}
+        />
+      );
+    }
+    case 'answer':
+      return (
+        <AssistantText
+          text={block.text}
+          onOpenInEditor={onOpenInEditor}
+          charts={{ tables: block.tables, onShowTable }}
+        />
+      );
+  }
+}
+
+interface ItemProps {
+  item: Extract<ChatItem, { kind: 'user' | 'session' | 'notice' }>;
+  backend: { name: string; model: string; delegated: boolean };
+}
+
+function Item({ item, backend }: ItemProps) {
   switch (item.kind) {
     case 'user':
       return (
         <div className="selectable ml-12 self-end rounded-2xl bg-surface-sunken px-3.5 py-2 break-words whitespace-pre-wrap">
           {item.text}
         </div>
-      );
-    case 'assistant':
-      return <AssistantText text={item.text} onOpenInEditor={onOpenInEditor} />;
-    case 'tool':
-      return (
-        <ToolCard
-          item={item}
-          onOpenInEditor={onOpenInEditor}
-          onShowTable={onShowTable}
-          onAnswer={onAnswer}
-        />
       );
     case 'session':
       return <SessionChips item={item} backend={backend} />;

@@ -280,6 +280,8 @@ export type AgentEvent =
         sql: string | null;
         /** The subagent that made the call. Absent for the main agent. */
         agent?: string;
+        /** Which of the model's steps in this turn asked for the call. */
+        step: number;
       };
     }
   | { event: 'approvalRequested'; data: { request: ApprovalRequest } }

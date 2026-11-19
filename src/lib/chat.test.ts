@@ -44,7 +44,7 @@ function play(events: AgentEvent[], from: ChatState = userSent(emptyChat, 'hello
 
 const started = (id: string, tool: string, sql: string | null): AgentEvent => ({
   event: 'toolCallStarted',
-  data: { id, tool, arguments: sql ? { sql } : {}, sql },
+  data: { id, tool, arguments: sql ? { sql } : {}, sql, step: 1 },
 });
 
 const finished = (id: string, isError = false, text = 'ok'): AgentEvent => ({
@@ -309,8 +309,26 @@ describe('splitFences', () => {
     expect(segments[2]).toMatchObject({ language: 'json' });
   });
 
-  it('leaves an unterminated fence as text', () => {
-    expect(splitFences('```sql\nSELECT 1')).toEqual([{ kind: 'text', text: '```sql\nSELECT 1' }]);
+  it('takes a fence that is not closed yet as a block still being written', () => {
+    expect(splitFences('```sql\nSELECT 1')).toEqual([
+      { kind: 'code', language: 'sql', code: 'SELECT 1', open: true },
+    ]);
+    // The pieces of a reply can stop anywhere, also half way through the fence line.
+    expect(splitFences('Here it is:\n\n```cha')).toEqual([
+      { kind: 'text', text: 'Here it is:' },
+      { kind: 'code', language: 'cha', code: '', open: true },
+    ]);
+    expect(splitFences('```sql\nSELECT 1\n```\nand\n```chart\n{"type"')).toEqual([
+      { kind: 'code', language: 'sql', code: 'SELECT 1' },
+      { kind: 'text', text: 'and' },
+      { kind: 'code', language: 'chart', code: '{"type"', open: true },
+    ]);
+  });
+
+  it('leaves backticks in the middle of a line alone', () => {
+    expect(splitFences('Use ``` to open a block.')).toEqual([
+      { kind: 'text', text: 'Use ``` to open a block.' },
+    ]);
   });
 
   it('returns nothing for blank text', () => {
@@ -456,7 +474,13 @@ describe('subagents', () => {
     const state = play([
       {
         event: 'toolCallStarted',
-        data: { id: 't1', tool: 'subagent', arguments: { task: 'Count github repos' }, sql: null },
+        data: {
+          id: 't1',
+          tool: 'subagent',
+          arguments: { task: 'Count github repos' },
+          sql: null,
+          step: 2,
+        },
       },
       {
         event: 'toolCallStarted',
@@ -466,12 +490,13 @@ describe('subagents', () => {
           arguments: { sql: 'SELECT 1' },
           sql: 'SELECT 1',
           agent: 'github-count',
+          step: 2,
         },
       },
     ]);
     const [task, query] = tools(state);
-    expect(task).toMatchObject({ tool: 'subagent', agent: null });
-    expect(query).toMatchObject({ tool: 'run_select_query', agent: 'github-count' });
+    expect(task).toMatchObject({ tool: 'subagent', agent: null, step: 2 });
+    expect(query).toMatchObject({ tool: 'run_select_query', agent: 'github-count', step: 2 });
     expect(toolTitle('subagent')).toBe('Subagent');
     expect(argumentSummary(task?.arguments)).toBe('task: Count github repos');
   });
