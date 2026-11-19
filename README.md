@@ -2,7 +2,7 @@
 
 Desktop query IDE and chat interface for [StackQL](https://github.com/stackql/stackql), for Windows and macOS.
 
-Status: pre-alpha. The query IDE foundations (M0), the core of chat (M3) and chat through the GitHub Copilot CLI work on Windows. Nothing here is released yet, and nothing has been run on macOS.
+Status: pre-alpha. The query IDE foundations (M0), the core of chat (M3) and chat through the GitHub Copilot CLI work on Windows. Nothing here is released yet. On macOS the tests pass in CI and CI builds a test build, but the app has not been opened on a Mac.
 
 ## Overview
 
