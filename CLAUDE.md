@@ -16,6 +16,7 @@ Pre-alpha. This much has landed on Windows.
 - A chat-first layout: chat is the view the app opens in, with a side menu for the explorer and activity, and File, Edit, View, Query, Providers and Help menus.
 - Most of M1, the query IDE: editor tabs, completion from provider metadata, the JSON cell viewer, statement history, export as CSV and JSON, and a `stackql exec` command for a statement.
 - A query library view: the entries of the published query library, for the operator, with no chat backend needed.
+- A conversation that shows a turn as its answer: the calls the assistant made are a list of steps that folds away, a call that failed is written to the app's log and not listed, the result set is a table that sorts and downloads, and a model can ask for a chart with a chart block.
 
 Not started: the rest of M1 (saved `.iql` files, cancel, a streaming grid), M2 (packaging), plan sign-in and any delegated agent other than the Copilot CLI. Replies from the API key backends are not streamed yet. Replies from the Copilot CLI are.
 
@@ -31,7 +32,8 @@ What has and has not been run:
 - No API key backend has been run against a real inference provider. Each is tested against a local stub that checks what goes on the wire, and the loop is tested against a real `stackql mcp` with a scripted model.
 - The Copilot backend has been run for real, against GitHub Copilot CLI 1.0.113 with a signed-in account. Its protocol handling is also tested against a scripted agent.
 - The explorer, completion, history, export through the save dialog, the activity filters, the theme choice and the query library were each driven in the built app on Windows. The "Copy as CLI" commands were run in Windows PowerShell 5.1 and PowerShell 7 against the real engine. The POSIX form was checked in a shell under WSL with a stand-in program, not on macOS.
-- The Help menu's links have not been opened by a test. The address each one opens is tested.
+- The Help menu's links have not been opened by a test. The address each one opens is tested. Help > Show Log File has not been clicked either, since it opens a window on the desktop. The log file it shows was read after real turns.
+- The conversation layout, the charts and the sortable table were driven in the built app on Windows in both themes, with a scripted model against the real engine: a declined approval, a call that failed and was not listed, each chart type, a chart that could not be drawn, sorting, and a CSV saved through the save dialog. One turn was then run for real through the Copilot CLI 1.0.114 on `claude-haiku-4.5`, which wrote a chart block from the guidance on its first try. No API key backend has drawn a chart from a real model.
 - The supervisor's tests see a child end by waiting on a handle to it on Windows, and with `kill -0` on Unix. They used to ask `tasklist`, which on a busy machine could use up the time a test allowed. They passed 30 runs in a row with every core busy. With twice as many busy loops as cores a different test, `an_unexpected_exit_is_reported_with_its_code`, missed its 10 second limit twice in 30 runs.
 
 Update this section when a milestone lands. The roadmap is in `README.md`.
@@ -79,6 +81,8 @@ These are the chosen defaults. Check the current stable version and API of each 
 | HTTPS client | `reqwest` with the OS TLS stack (`native-tls`) |
 | ACP client | Written in this repository: JSON-RPC over stdio, protocol version 1, the client side only |
 | Markdown in replies | Written in this repository: a small reader that builds a tree, never HTML |
+| Charts in replies | Written in this repository: a chart block read as data and drawn as SVG. No charting library, in the webview or the host |
+| App log | Written in this repository: one JSON lines file for each run, in the app data directory |
 
 The MCP client library must support the client side of elicitation and protocol revision negotiation. `rmcp` 3.11 does both. That was confirmed against the real engine and is recorded in `docs/spike-mcp.md`.
 
@@ -99,7 +103,7 @@ The layout is below. Keep it current as the code lands.
 stackql-workbench/
   src/                  webview (React)
     host/               typed wrappers over IPC, the only Tauri imports
-    lib/                pure logic with tests: results, cells, export formats, explorer tree, statement templates, completion, tabs, history, the CLI command, chat, activity, the query library, menu, theme, markdown
+    lib/                pure logic with tests: results, cells, sorting, export formats, explorer tree, statement templates, completion, tabs, history, the CLI command, chat, the conversation layout, the chart block and its layout, activity, the query library, menu, theme, markdown
     state/              hooks that connect the host to the panes
     panes/              shell (menu bar, side menu), chat, explorer, editor, results, library, activity, settings, statusbar
     ui/                 small shared components
@@ -108,13 +112,14 @@ stackql-workbench/
       engine/           discovery, data folder, port selection, supervisor, job object, watchdog
       connection/       Connection trait, LocalConnection, safety mode, agent channel
       query/            pg wire session, statement splitting, results, explorer statements
-      agent/            MCP client, approvals, InferenceBackend trait, backends, loop, ACP client, delegated agent
+      agent/            MCP client, approvals, InferenceBackend trait, backends, loop, ACP client, delegated agent, what a model is told about presentation, the turn log
       secrets/          keychain access
       activity/         operator history, engine audit log reader
       icons/            provider icon lookup, fetch and cache
       library/          the query library's index and documents, fetch and cache
       config/           settings
       ipc/              command and event definitions, saving an export, the app's own links
+      applog.rs         the app's own log
     examples/           pgwire_spike and mcp_spike, the probes behind the spike reports
     tests/              integration tests against a real stackql
   scripts/              test launcher
@@ -159,6 +164,8 @@ Things to know about them:
 - The release executable is `src-tauri/target/release/stackql-workbench.exe` on Windows.
 - The engine's `--approot` is `.stackql` beside the Workbench executable. For a build from this repository that is `src-tauri/target/release/.stackql`, or `target/debug/.stackql` under `npm run tauri dev`. Where that folder cannot be written to, the fallback is `<app data dir>/engine`, which on Windows is `%APPDATA%\io.stackql.workbench\engine`. The operator can name another folder in Settings.
 - Settings are in `<app config dir>/settings.json`. The agent audit log is in `<app data dir>/audit` and the operator's statement history in `<app data dir>/history.jsonl`. Those two do not move with the engine's data folder.
+- The app's own log is in `<app data dir>/logs`, one file for each run, named `stackql_workbench_<UTC time>.log`. The host writes it and nothing reads it back. It is apart from the engine's audit log, which the engine writes. The 20 newest files are kept.
+- To run a build beside an installed copy without sharing its settings, history and logs, give it another identifier: `npm run tauri build -- --debug --no-bundle --config <file>` with a file that holds `{ "identifier": "io.stackql.workbench.dev" }`. The app data and config directories are named after the identifier.
 - One test writes and removes a throwaway entry in the real OS keychain. It skips itself where no keychain can be opened.
 - An editor's language server can build in the same `target` directory and hold a file the build needs, which shows up as linker error `LNK1104` on Windows. Running the command again clears it.
 
@@ -276,6 +283,7 @@ Where this is handled was decided by the maintainer on 18 November 2026: in the 
 - That was checked against v1.0.888 with no provider credentials in the environment. A call that needs a sign-in returned the tool error. A list for an owner that does not exist returned no rows.
 - On the human channel `srv` answers a provider call that returned nothing with an empty, successful result, and with `--pgsrv.debug.enable` a notice carries what the provider said. That stays. The server cannot fail a statement because a lookup found nothing, and the engine reaches providers over more than one protocol, gRPC among them.
 - This app passes on what the engine says and adds nothing. It does not sort a provider's answer by status code, does not call an answer a failure, and does not add to or change what a model is told about a result. If something seems to need that, the change belongs in the engine's MCP server.
+- Leaving a failed call out of the conversation is a matter of display, decided by the maintainer on 19 November 2026. The model still receives the engine's error exactly as the engine sent it, and the host writes it to the app's log. A call counts as failed when the engine, or the agent, said it failed. Nothing in the app works that out.
 - An earlier version of this file, and of `docs/spike-mcp.md`, said the MCP server hides provider failures from the model. That was wrong. It came from testing one lookup that found nothing and taking it for every kind of failure. Test more than one case before recording an engine behaviour, and read the engine's source when it is to hand.
 
 ### Credentials
@@ -313,6 +321,7 @@ How they are built:
 - The tool calls of one reply run at the same time when the engine marks the tool as not destructive, with `destructiveHint: false`. That covers its query and discovery tools. A tool the engine marks as destructive, or one that carries no hint, runs alone and in the model's order, so what follows a change sees the change. The host takes the engine's word for this and reads nothing into the statement. Results go back to the model in the order it asked.
 - More than one approval prompt can be open at once. A prompt is shown on the tool call that sent the statement.
 - The API key is read from the keychain when a turn starts. Settings hold the backend, the model and the address, never the key.
+- A model is told how its work is shown, and how to ask for a chart, by one text in `agent/guidance.rs`. The host's loop puts it in the system prompt ahead of the engine's guidance. A delegated agent gets it with the first message. It is about presentation only, which is this app's to say because drawing is this app's capability. It says nothing about how a result is to be read. A test holds it to that.
 
 What exists now under item 3 is the GitHub Copilot CLI. Every point was tested. See `docs/spike-acp.md`.
 
@@ -355,7 +364,18 @@ A few fixed points for the interface.
 - Layout: a menu bar with File, Edit, View, Query, Providers and Help, a side menu, one main view at a time, and the status bar. The views are chat, the explorer with the editor and results, the query library, and activity. Settings is a dialog. Chat is the view the app opens in.
 - The menus are drawn in the webview, not by the OS, so they are the same on both platforms and can be tested like the rest of the page. They repeat what the side menu and the panes offer.
 - Every view stays mounted while another is shown, so the editor keeps its text and history and a running turn keeps its place.
-- Row results from the assistant are shown in the conversation, first rows only, with a way to open the full result in the grid.
+- A turn is shown as its answer. The layout is worked out in `src/lib/conversation.ts`, and `docs/charts.md` describes it.
+  - What the assistant did on the way is one list of steps above the answer: each call with its SQL and its result, and what the assistant wrote before going on to another call. The list is open while the turn runs and folded away when it ends. It is always open while a call waits for the operator's decision.
+  - A call that failed is not listed, and its error text is drawn nowhere. The host writes it to the app's log. Help > Show Log File shows the file. The Activity view still lists every statement the agent ran, with the engine's decision.
+  - A call the operator was asked about stays in the list whatever became of it. If they approved it and it then failed, the step shows why, because the outcome of their own decision is theirs to see.
+  - A turn that fails as a whole, for example on a rejected API key, still says so in the conversation.
+  - The last statement of the turn that returned rows is shown under the steps as a table, with the statements the assistant asked for in the same step, up to four in all. An answer that holds chart blocks is shown with those instead. The host marks each call with the step that asked for it. For a delegated agent, which does not say where a step ends, the calls that follow one of its messages count as one step.
+- A result set in the conversation is a table of every row the host sent, in the same grid as the results pane. A click on a column sorts by it: ascending, descending, then the order of arrival. Numbers sort by size and empty values go last. The download control saves the rows as CSV, in the order shown, through the system's save dialog. The results pane sorts the same way.
+- A model asks for a chart with a fenced block of the language `chart` that holds one JSON object. The format, where the rows come from, the limits and the mark rules are in `docs/charts.md`.
+  - The block is data. It is parsed, checked and drawn as SVG by components in this repository. Nothing in it is run and nothing a model writes becomes markup.
+  - The rows come from the most recent result set that has the columns the block names, or from the block itself. A block that cannot be drawn is shown as the text it is, with the reason.
+  - A chart and its table are two views of the same rows, one click apart. A chart has one value axis and at most eight series.
+  - The series colours are the tokens `--chart-1` to `--chart-8`, used in order and never cycled. The order keeps neighbours apart for colour-blind readers and was checked as a set in each theme. Do not add or reorder one by eye.
 - Replies are read as markdown by a small reader in `src/lib/markdown.ts` that builds a tree. Model output is never turned into HTML. Links are shown and never opened.
 - The only links the app opens are its own, from the Help menu and the About dialog: the documentation, the query library and the issue tracker. The webview names a link and the host holds its address, so nothing on a page can have an address opened.
 - Activity lists time, who ran it, the safety mode, the statement, the duration, the row count and the outcome, and can be narrowed by who and by outcome. For the agent the outcome is the engine's `decision` from its audit log, grouped for the filter and never worked out from the statement. The audit log has no row count and does not say which backend made a call, so agent rows show no count and are labelled "Agent". What is listed can be saved as JSONL.

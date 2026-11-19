@@ -13,8 +13,9 @@ The planned capabilities are listed below.
 - Provider explorer: a lazy tree of providers, services, resources, methods and fields
 - Query library: the published library of working statements, grouped by use case, to open in the editor
 - Query editor: tabs, StackQL-aware completion, saved `.iql` files
-- Results grid: virtualised rows, JSON cell viewer, export
+- Results grid: virtualised rows, sorting by column, JSON cell viewer, export
 - Chat: the view the app opens in. It needs a model backend, and asks for one the first time a message is sent
+- Answers with results: a turn is shown as its answer, with the result set as a table that sorts and downloads, and as a chart when one is asked for
 - Approvals and activity: mutations proposed by a model wait for the operator, and every agent action is logged
 - Settings: engine path, credentials profile, safety mode, inference backend
 
@@ -226,6 +227,10 @@ Chat needs a model backend. The first time you send a message without one, the m
 
 With an API key backend, independent queries the model asks for in one step run at the same time.
 
+A turn is shown as its answer. What the assistant did on the way, the calls it made with their SQL and results, is a list of steps above the answer that folds away when the turn ends. The result set the answer rests on is shown as a table: click a column to sort by it, and use the download control to save it as CSV. Ask for a chart, a plot or a trend and the assistant draws one from the result: bars, a line, an area, a pie or a scatter chart, with the table of the same rows one click away.
+
+A statement that fails on the way to an answer is not listed in the conversation. The assistant corrects it and carries on. Each one is written to the app's log with what came back, and Help > Show Log File opens it. The Activity view still lists every statement the assistant ran, with its outcome.
+
 Without a backend the explorer and the query editor work as before.
 
 ## Repository layout
@@ -252,16 +257,17 @@ stackql-workbench/
       library/          the query library
       config/           settings
       ipc/              command and event definitions
+      applog.rs         the app's own log
     examples/           the probes behind the spike reports
     tests/              integration tests against a real stackql
   docs/                 design notes and spike reports
 ```
 
-What the engine actually does on each channel is recorded in [docs/spike-pgwire.md](docs/spike-pgwire.md) and [docs/spike-mcp.md](docs/spike-mcp.md). What the Copilot CLI does as a delegated agent is in [docs/spike-acp.md](docs/spike-acp.md).
+What the engine actually does on each channel is recorded in [docs/spike-pgwire.md](docs/spike-pgwire.md) and [docs/spike-mcp.md](docs/spike-mcp.md). What the Copilot CLI does as a delegated agent is in [docs/spike-acp.md](docs/spike-acp.md). How a model asks for a chart, how a turn is laid out and what the app's log holds are in [docs/charts.md](docs/charts.md).
 
 ## Roadmap
 
-Milestones are delivered in order where they depend on each other. Each one leaves the app in a usable state. M0 is done, and the core of M3 was built ahead of M1 and M2 so that both the IDE and chat could be tried together. The first delegated agent from M5, the GitHub Copilot CLI, is also in. Most of M1 is in: tabs, completion, the JSON cell viewer, history and export. Saved `.iql` files, cancel and a streaming grid are not.
+Milestones are delivered in order where they depend on each other. Each one leaves the app in a usable state. M0 is done, and the core of M3 was built ahead of M1 and M2 so that both the IDE and chat could be tried together. The first delegated agent from M5, the GitHub Copilot CLI, is also in. Most of M1 is in: tabs, completion, the JSON cell viewer, history and export. Saved `.iql` files, cancel and a streaming grid are not. Chat also shows a turn as its answer, with charts and a sortable result table, which was not in the first plan for M3.
 
 | Milestone | Scope |
 |---|---|
