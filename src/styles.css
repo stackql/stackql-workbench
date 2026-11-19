@@ -40,6 +40,20 @@
   --syntax-comment: #6a737d;
   --syntax-type: #7a3e9d;
   --syntax-func: #795e26;
+
+  /* The series of a chart, in a fixed order that is never cycled. The first
+     is a step of Classic Blue. The order is what keeps neighbours apart for
+     colour-blind readers, so a new colour is not added by eye: the set was
+     checked as a whole against this surface. Three of the light steps sit
+     under 3 to 1 on white, which is why every chart has a table beside it. */
+  --chart-1: #16599a;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #6250d6;
+  --chart-8: #e34948;
 }
 
 :root[data-theme='dark'] {
@@ -66,6 +80,16 @@
   --syntax-comment: #8b97a5;
   --syntax-type: #c9a3e6;
   --syntax-func: #dcc98a;
+
+  /* The same eight hues, stepped for the dark surface. */
+  --chart-1: #3f82c4;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #0ca30c;
+  --chart-7: #9085e9;
+  --chart-8: #e66767;
 }
 
 /* In the base layer, so that utility classes win over these element rules. */

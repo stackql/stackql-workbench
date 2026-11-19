@@ -40,7 +40,7 @@ function block(start: string): string {
 
 function tokens(text: string): Record<string, string> {
   const found: Record<string, string> = {};
-  for (const match of text.matchAll(/--([a-z-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)) {
+  for (const match of text.matchAll(/--([a-z][a-z0-9-]*):\s*(#[0-9a-fA-F]{6})\s*;/g)) {
     if (match[1] && match[2]) {
       found[match[1]] = match[2];
     }
@@ -90,6 +90,30 @@ describe.each([
       ).toBeGreaterThanOrEqual(4.5);
     },
   );
+});
+
+/** The series of a chart, in their fixed order. */
+const CHART = Array.from({ length: 8 }, (_, index) => `chart-${index + 1}`);
+
+describe.each([
+  ['light', light, 2],
+  ['dark', dark, 3],
+])('the chart colours of the %s theme', (_name, theme, floor) => {
+  it('are eight, each of them different', () => {
+    const values = CHART.map((token) => theme[token]?.toLowerCase());
+    for (const value of values) {
+      expect(value).toMatch(/^#[0-9a-f]{6}$/);
+    }
+    expect(new Set(values).size).toBe(CHART.length);
+  });
+
+  // A mark is not text, so the bar is lower than for ink. The light theme
+  // has three steps under 3 to 1, which the table beside every chart is
+  // there to make up for. None may fade into the surface.
+  it.each(CHART)(`draws %s on the surface at ${floor} to 1 or better`, (token) => {
+    const ratio = contrastRatio(theme[token] ?? '', theme['color-surface'] ?? '');
+    expect(ratio, `${theme[token]} is ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(floor);
+  });
 });
 
 describe('the brand colour', () => {
