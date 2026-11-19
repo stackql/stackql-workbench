@@ -345,6 +345,9 @@ export function App() {
         case 'reportIssue':
           void host.openLink('issues').catch(() => undefined);
           break;
+        case 'showLog':
+          void host.revealLog().catch(() => undefined);
+          break;
         case 'about':
           setAboutOpen(true);
           break;

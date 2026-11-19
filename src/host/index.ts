@@ -152,6 +152,12 @@ export const host = {
   /** Opens one of the app's own links in the operator's browser. */
   openLink: (link: AppLink) => invoke('open_link', { link }),
 
+  /**
+   * Shows the app's log file for this run in the system's file manager.
+   * The host holds the path, and resolves to it.
+   */
+  revealLog: () => invoke<string>('reveal_log'),
+
   /** The version of this app. */
   appVersion: () => getVersion(),
 

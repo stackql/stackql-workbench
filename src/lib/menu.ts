@@ -25,6 +25,7 @@ export type CommandId =
   | 'openDocs'
   | 'openQueryLibrary'
   | 'reportIssue'
+  | 'showLog'
   | 'about'
   | 'exit'
   | 'undo'
@@ -148,6 +149,9 @@ export const MENUS: Menu[] = [
       command('openDocs', 'Documentation'),
       command('openQueryLibrary', 'Query Library'),
       command('reportIssue', 'Report an Issue'),
+      separator,
+      // Where a failed call of the assistant is written, since the conversation does not list it.
+      command('showLog', 'Show Log File'),
       separator,
       command('about', 'About StackQL Workbench'),
     ],

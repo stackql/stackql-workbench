@@ -19,6 +19,8 @@ use crate::agent::backends;
 use crate::agent::runtime::{
     AgentEvent, AgentRuntime, DelegateInfo, DelegateRequest, Emit, TurnSummary,
 };
+use crate::agent::turnlog::TurnLog;
+use crate::applog::AppLog;
 use crate::config::{InferenceSettings, Settings, SettingsStore};
 use crate::connection::{Connection, EngineStatus, EventSink, SafetyMode};
 use crate::error::{HostError, HostResult};
@@ -43,6 +45,8 @@ pub struct AppState {
     /// memory for this run only.
     pub keychain_available: bool,
     pub history: Arc<History>,
+    /// The app's own log for this run.
+    pub log: Arc<AppLog>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -423,6 +427,10 @@ pub async fn agent_set_safety_mode(
 
 /// Sends a message to the assistant. Events stream over `on_event` while
 /// the command is pending. It resolves when the turn ends.
+///
+/// What goes wrong on the way is also written to the app's log: a tool call
+/// that failed, and a turn that did. The conversation does not list the
+/// first, so the log is where it can be read.
 #[tauri::command]
 pub async fn agent_send(
     state: State<'_, AppState>,
@@ -430,12 +438,43 @@ pub async fn agent_send(
     on_event: Channel<AgentEvent>,
 ) -> HostResult<TurnSummary> {
     let settings = state.settings.get();
-    let inference = settings.inference.ok_or_else(|| {
+    let inference = settings.inference.clone().ok_or_else(|| {
         HostError::Agent("Chat is not configured. Choose a backend in Settings.".to_string())
     })?;
+    let turn_log = Arc::new(TurnLog::new(
+        state.log.clone(),
+        backend_name(inference.kind),
+        &inference.model,
+        settings.safety_mode,
+    ));
+    let observer = turn_log.clone();
     let emit: Emit = Arc::new(move |event| {
+        observer.observe(&event);
+        // A send only fails when the webview has gone away.
         let _ = on_event.send(event);
     });
+    let outcome = run_turn(&state, &settings, inference, text, emit).await;
+    turn_log.finished(&outcome);
+    outcome
+}
+
+/// The backend's name as settings spell it, for the log.
+fn backend_name(kind: BackendKind) -> &'static str {
+    match kind {
+        BackendKind::Gemini => "gemini",
+        BackendKind::Anthropic => "anthropic",
+        BackendKind::OpenaiCompatible => "openai_compatible",
+        BackendKind::GithubCopilot => "github_copilot",
+    }
+}
+
+async fn run_turn(
+    state: &AppState,
+    settings: &Settings,
+    inference: InferenceSettings,
+    text: String,
+    emit: Emit,
+) -> HostResult<TurnSummary> {
     if inference.kind.is_delegated() {
         return state
             .agent
@@ -530,4 +569,19 @@ pub async fn activity_list(
         operator: state.history.list(limit),
         agent,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_log_names_a_backend_the_way_settings_do() {
+        for kind in BackendKind::ALL {
+            assert_eq!(
+                serde_json::to_value(kind).unwrap(),
+                serde_json::Value::String(backend_name(kind).to_string())
+            );
+        }
+    }
 }

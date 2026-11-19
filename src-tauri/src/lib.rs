@@ -5,6 +5,7 @@
 
 pub mod activity;
 pub mod agent;
+pub mod applog;
 pub mod config;
 pub mod connection;
 pub mod engine;
@@ -22,9 +23,10 @@ use tauri::{Emitter, Manager, RunEvent};
 
 use crate::activity::History;
 use crate::agent::runtime::AgentRuntime;
+use crate::applog::AppLog;
 use crate::config::SettingsStore;
-use crate::connection::Connection;
 use crate::connection::local::LocalConnection;
+use crate::connection::{Connection, EngineState, EngineStatus};
 use crate::engine::approot::Defaults as ApprootDefaults;
 use crate::icons::ProviderIcons;
 use crate::ipc::AppState;
@@ -51,12 +53,23 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         settings.clone(),
     )?);
 
-    // Forward every status change to the webview.
+    // The app's own log, one file for each run. It is apart from the
+    // engine's audit log, which the engine writes.
+    let log = Arc::new(AppLog::start(&data_dir.join("logs")));
+
+    // Forward every status change to the webview, and note in the log when
+    // the engine comes up or fails to.
     let handle = app.handle().clone();
     let mut status = connection.watch_status();
+    let status_log = log.clone();
     tauri::async_runtime::spawn(async move {
+        let mut last_state = None;
         loop {
             let current = status.borrow_and_update().clone();
+            if last_state != Some(current.state) {
+                last_state = Some(current.state);
+                log_engine_state(&status_log, &current);
+            }
             let _ = handle.emit(ipc::ENGINE_STATUS_EVENT, current);
             if status.changed().await.is_err() {
                 break;
@@ -89,8 +102,35 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         secrets,
         keychain_available,
         history: Arc::new(History::new(data_dir.join("history.jsonl"))),
+        log,
     });
     Ok(())
+}
+
+/// Writes a change of the engine's state to the app's log. A failure goes
+/// in with its reason and the engine's last lines, which the banner also
+/// shows. The environment the engine was given is never part of a status.
+fn log_engine_state(log: &AppLog, status: &EngineStatus) {
+    match status.state {
+        EngineState::Running => log.info(
+            "engine_running",
+            serde_json::json!({
+                "location": status.location,
+                "version": status.version,
+                "endpoint": status.endpoint,
+                "dataFolder": status.data_folder,
+            }),
+        ),
+        EngineState::Failed => log.error(
+            "engine_failed",
+            serde_json::json!({
+                "location": status.location,
+                "error": status.error,
+                "logTail": status.log_tail,
+            }),
+        ),
+        EngineState::Stopped | EngineState::Starting => {}
+    }
 }
 
 /// Starts the app. Does not return until the app exits.
@@ -129,6 +169,7 @@ pub fn run() {
             ipc::activity_list,
             ipc::save::save_text_file,
             ipc::links::open_link,
+            ipc::links::reveal_log,
             ipc::library_index,
             ipc::library_document,
         ])

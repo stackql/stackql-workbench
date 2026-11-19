@@ -49,6 +49,14 @@ describe('the menus', () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it('offer the log file under Help', () => {
+    const help = MENUS.find((menu) => menu.label === 'Help');
+    const labels = (help?.entries ?? []).flatMap((entry) =>
+      entry.kind === 'command' && entry.id === 'showLog' ? [entry.label] : [],
+    );
+    expect(labels).toEqual(['Show Log File']);
+  });
+
   it('offer the theme as a choice of three under View', () => {
     const view = MENUS.find((menu) => menu.label === 'View');
     const choices = (view?.entries ?? []).flatMap((entry) =>

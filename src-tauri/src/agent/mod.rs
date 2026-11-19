@@ -16,3 +16,4 @@ pub mod copilot;
 pub mod delegate;
 pub mod mcp;
 pub mod runtime;
+pub mod turnlog;
