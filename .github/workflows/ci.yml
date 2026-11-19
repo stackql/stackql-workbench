@@ -147,3 +147,82 @@ jobs:
           name: stackql-workbench-macos-universal
           path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
+
+      # The app on its own, for the StackQL PKG, which installs it beside the
+      # stackql command and signs what it ships. It is packed with tar because
+      # a bundle holds links and permissions that a zip of loose files loses.
+      - name: Pack the app for the installer
+        shell: bash
+        run: |
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app=$(ls -d "$bundle"/macos/*.app)
+          mkdir -p installer-input
+          tar -czf installer-input/stackql-workbench-macos-universal.app.tar.gz \
+            -C "$(dirname "$app")" "$(basename "$app")"
+          cd installer-input
+          shasum -a 256 stackql-workbench-macos-universal.app.tar.gz \
+            > stackql-workbench-macos-universal.app.tar.gz.sha256
+          cat stackql-workbench-macos-universal.app.tar.gz.sha256
+          tar -tzf stackql-workbench-macos-universal.app.tar.gz | head -n 12
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stackql-workbench-macos-universal-app
+          path: installer-input/*
+          if-no-files-found: error
+
+  # The executable the StackQL MSI installs beside stackql.exe. It is the
+  # optimised build, with no installer of its own, and it is not signed here:
+  # the StackQL release signs what it ships. Like the Mac build it does not
+  # wait for the checks.
+  build-windows:
+    name: Build (Windows, x64)
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Kept apart from the cache of the checks, which hold a debug build.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: release
+
+      - name: Install webview dependencies
+        run: npm ci
+
+      - name: Build the executable
+        run: npm run tauri build -- --no-bundle
+
+      # The executable must stand on its own in the installer's folder. It
+      # may use the C runtime that is part of Windows, and nothing that would
+      # have to be installed with it.
+      - name: Check the executable
+        shell: pwsh
+        run: |
+          $exe = 'src-tauri/target/release/stackql-workbench.exe'
+          if (-not (Test-Path $exe)) { throw "No executable at $exe" }
+          $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes((Resolve-Path $exe)))
+          foreach ($library in 'vcruntime140', 'msvcp140', 'WebView2Loader.dll') {
+            if ($text -match [regex]::Escape($library)) { throw "The executable needs $library beside it." }
+          }
+          New-Item -ItemType Directory -Force installer-input | Out-Null
+          Copy-Item $exe installer-input/
+          $hash = (Get-FileHash installer-input/stackql-workbench.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  stackql-workbench.exe" | Set-Content installer-input/stackql-workbench.exe.sha256
+          Get-Item installer-input/stackql-workbench.exe | Format-List Name, Length
+          Get-Content installer-input/stackql-workbench.exe.sha256
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stackql-workbench-windows-x64
+          path: installer-input/*
+          if-no-files-found: error

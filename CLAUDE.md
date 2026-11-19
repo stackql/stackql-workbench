@@ -20,7 +20,9 @@ Pre-alpha. This much has landed on Windows.
 
 Not started: the rest of M1 (saved `.iql` files, cancel, a streaming grid), M2 (packaging), plan sign-in and any delegated agent other than the Copilot CLI. Replies from the API key backends are not streamed yet. Replies from the Copilot CLI are.
 
-CI has a job that builds a universal macOS disk image and keeps it as a workflow artifact, so the app can be tried on a Mac. The signature is ad hoc and nothing is notarised. It is a test build, not M2, and it decides nothing about the signing identities, which are still an open question.
+CI has a job that builds a universal macOS disk image and keeps it as a workflow artifact, so the app can be tried on a Mac. The signature is ad hoc and nothing is notarised. It is a test build, not M2.
+
+CI also keeps what the StackQL MSI and PKG are built from: the optimised Windows executable as `stackql-workbench-windows-x64`, and the Mac app bundle, packed with tar, as `stackql-workbench-macos-universal-app`. Each comes with its SHA-256. Neither is signed for release. The maintainer said on 19 November 2026 that the StackQL release signs what it ships, so this repository holds no signing identity and signs nothing but the ad hoc signature a Mac needs to run the app at all. Workflow artifacts last 90 days and are not a release. There is no tagged release yet, which is how a shipped build should be pinned.
 
 What has and has not been run:
 
@@ -436,7 +438,7 @@ Raise these with the maintainer when the work reaches them. Do not decide them a
 
 - How Workbench versions are pinned to engine releases, and the minimum engine version check at startup.
 - How the MSI handles a missing WebView2 runtime on older Windows versions.
-- Signing and notarisation identities for the Windows executable and the macOS app bundle.
+- How a build that ships is released from this repository: a tag and a release whose files the StackQL release fetches, in place of workflow artifacts that expire.
 - Whether `srv` should later co-host the MCP server so the IDE and the agent share one engine session.
 - Whether loopback pg wire needs TLS with a per-launch client certificate.
 
@@ -452,3 +454,5 @@ These came out of the two engine spikes and need an answer from the engine side.
 - Row objects from the MCP server lose the column order of the statement.
 
 The licence is decided: MIT, the same as `stackql`.
+
+Signing is decided too. The maintainer signs the Windows executable and the macOS app, and notarises the app, in the StackQL release that ships them. This repository signs nothing for release.

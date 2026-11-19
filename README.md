@@ -212,6 +212,19 @@ To try it:
 
 The same build on a Mac is `npm run tauri build -- --target universal-apple-darwin --bundles app,dmg`, after `rustup target add aarch64-apple-darwin x86_64-apple-darwin`.
 
+### What the installers take
+
+CI also keeps what the StackQL MSI and PKG are built from, on every run, as two more workflow artifacts. Each holds one file and its SHA-256.
+
+| Artifact | Holds | For |
+|---|---|---|
+| `stackql-workbench-windows-x64` | `stackql-workbench.exe`, the optimised build | The MSI, which installs it beside `stackql.exe` |
+| `stackql-workbench-macos-universal-app` | `stackql-workbench-macos-universal.app.tar.gz`, the app bundle for Apple Silicon and Intel | The PKG, which installs it to `/Applications` |
+
+Neither is signed for release. The Windows executable has no signature and the Mac app has an ad hoc one, so the StackQL release signs both, and notarises the Mac app, before it ships them. The Windows executable needs nothing installed beside it but the Microsoft WebView2 runtime. Unpack the Mac app with `tar -xzf`, which keeps the links and permissions inside the bundle.
+
+To fetch them from the latest run on `main`: `gh run download --repo stackql/stackql-workbench --branch main --name stackql-workbench-windows-x64`, and the same with the other name. GitHub keeps a workflow artifact for 90 days. A build to be shipped should come from a tagged release, which this repository does not make yet.
+
 ### Using the app
 
 The engine keeps its provider cache in a folder of the app's own: `.stackql` beside the executable, or the app data directory when that place cannot be written to, as under `Program Files`. A first run therefore lists no providers. Run `REGISTRY PULL github;` in the editor to install one. To use another folder, for example the `.stackql` folder you already use with the `stackql` CLI, set it under Settings.
