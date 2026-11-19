@@ -14,6 +14,7 @@ pub mod backend;
 pub mod backends;
 pub mod copilot;
 pub mod delegate;
+pub mod guidance;
 pub mod mcp;
 pub mod runtime;
 pub mod turnlog;

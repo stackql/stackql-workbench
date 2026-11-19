@@ -25,6 +25,7 @@ use super::backend::{
 };
 use super::copilot;
 use super::delegate::{DelegateSession, ModelOption};
+use super::guidance::PRESENTATION;
 use super::mcp::{McpSession, ToolResult};
 use crate::connection::{
     Connection, DelegateBuilder, DelegateCommand, McpServerCommand, SafetyMode,
@@ -48,16 +49,20 @@ const PREAMBLE: &str = "You are the assistant inside StackQL Workbench, a deskto
 cloud and SaaS providers with SQL through a local StackQL engine. You work through the tools \
 provided, which run against that engine.\n\n\
 How to work here:\n\
-- The operator sees every statement you run, as SQL, with the rows it returned, in a card above \
-your reply. Do not restate rows that a card already shows. Add interpretation only: what the \
-rows mean, what stands out, what to do next.\n\
-- When you run or propose a statement, show the SQL.\n\
 - Statements that change something may need the operator's approval. The tool asks for it. If the \
 operator declines, do not try again or look for another way to make the same change. Say what \
 you would have done and stop.\n\
 - You never see credentials and you do not need them. If a provider reports missing credentials, \
-tell the operator which provider needs them.\n\n\
-The engine's own guidance follows. It says how errors and empty results are to be read.\n\n";
+tell the operator which provider needs them.";
+
+const ENGINE_GUIDANCE_INTRO: &str =
+    "The engine's own guidance follows. It says how errors and empty results are to be read.";
+
+/// The system prompt for the host's own loop: who the assistant is, how its
+/// work is shown, and then the engine's guidance as the engine wrote it.
+fn system_prompt(engine_instructions: &str) -> String {
+    format!("{PREAMBLE}\n\n{PRESENTATION}\n\n{ENGINE_GUIDANCE_INTRO}\n\n{engine_instructions}")
+}
 
 /// A row result, in the same shape the editor's grid uses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -118,6 +123,11 @@ pub enum AgentEvent {
         /// The subagent that made the call, when it was not the main agent.
         #[serde(skip_serializing_if = "Option::is_none")]
         agent: Option<String>,
+        /// Which of the model's steps in this turn asked for the call, so
+        /// that calls asked for together can be shown together. The host's
+        /// own loop knows each step. A delegated agent's steps are told
+        /// apart by the message that goes before the calls.
+        step: usize,
     },
     /// The engine wants the operator's approval before it runs something.
     ApprovalRequested {
@@ -452,7 +462,7 @@ impl AgentRuntime {
             return Err(HostError::Agent("No engine session.".to_string()));
         };
 
-        let system = format!("{PREAMBLE}{}", mcp.instructions());
+        let system = system_prompt(mcp.instructions());
         let turn_start = messages.len();
         messages.push(Message::User { text });
 
@@ -531,10 +541,11 @@ impl AgentRuntime {
                     continue;
                 }
                 summary.tool_calls += group.len();
+                let step = summary.steps;
                 let results = join_all(
                     group
                         .iter()
-                        .map(|call| self.run_tool(mcp, call, &stop, &emit)),
+                        .map(|call| self.run_tool(mcp, call, step, &stop, &emit)),
                 )
                 .await;
                 for (call, result) in group.iter().zip(results) {
@@ -564,12 +575,13 @@ impl AgentRuntime {
         Ok(summary)
     }
 
-    /// Runs one tool call. `None` means the operator stopped the turn while
-    /// it was running.
+    /// Runs one tool call, asked for in the given step of the turn. `None`
+    /// means the operator stopped the turn while it was running.
     async fn run_tool(
         &self,
         mcp: &McpSession,
         call: &ToolCall,
+        step: usize,
         stop: &Notify,
         emit: &Emit,
     ) -> HostResult<Option<ToolOutcome>> {
@@ -584,6 +596,7 @@ impl AgentRuntime {
             arguments: Value::Object(call.arguments.clone()),
             sql,
             agent: None,
+            step,
         });
 
         let started = Instant::now();
@@ -766,6 +779,18 @@ mod tests {
             is_error: false,
             engine_notes: notes.iter().map(|n| (*n).to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn the_system_prompt_ends_with_the_engines_guidance_untouched() {
+        let prompt = system_prompt("# Overview\n\nStackQL exposes providers as SQL.");
+        assert!(prompt.starts_with("You are the assistant inside StackQL Workbench"));
+        assert!(prompt.ends_with("# Overview\n\nStackQL exposes providers as SQL."));
+        // How the work is shown comes before the engine's words, not after.
+        let shown = prompt.find("How your work is shown").unwrap();
+        let engine = prompt.find(ENGINE_GUIDANCE_INTRO).unwrap();
+        assert!(shown < engine);
+        assert!(prompt.contains("```chart"));
     }
 
     #[test]
@@ -1018,6 +1043,7 @@ mod tests {
             arguments: json!({ "sql": "SELECT 1" }),
             sql: Some("SELECT 1".into()),
             agent: None,
+            step: 2,
         };
         assert_eq!(
             serde_json::to_value(&event).unwrap(),
@@ -1027,7 +1053,8 @@ mod tests {
                     "id": "c1",
                     "tool": "run_select_query",
                     "arguments": { "sql": "SELECT 1" },
-                    "sql": "SELECT 1"
+                    "sql": "SELECT 1",
+                    "step": 2
                 }
             })
         );

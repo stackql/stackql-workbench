@@ -18,6 +18,7 @@ use super::acp::{
     AUTH_REQUIRED, AcpClient, AcpError, Incoming, METHOD_NOT_FOUND, PROTOCOL_VERSION,
 };
 use super::backend::{StopReason, Usage};
+use super::guidance::PRESENTATION;
 use super::runtime::{AgentEvent, Emit, MAX_UI_TEXT_CHARS, TurnSummary, table_from_structured};
 use crate::connection::AgentChannel;
 use crate::error::{HostError, HostResult};
@@ -37,10 +38,6 @@ pub const MAX_SUBAGENTS: usize = 12;
 const PRIMER: &str = "Context for this conversation: you are working inside StackQL Workbench, a \
 desktop tool for querying cloud and SaaS providers with SQL through a local StackQL engine. Work \
 only through the stackql tools.\n\
-- The operator sees every statement you run, as SQL, with the rows it returned, in a card above \
-your reply. Do not restate rows that a card already shows. Add interpretation only: what the \
-rows mean, what stands out, what to do next.\n\
-- When you run or propose a statement, show the SQL.\n\
 - If the engine refuses a statement because it needs approval, do not look for another way to \
 make the same change. Show the SQL and say the operator can run it themselves in the query \
 editor, or change the safety mode. Nothing else can approve it.\n\
@@ -270,7 +267,9 @@ impl DelegateSession {
         let name = self.profile.name;
         let mut blocks = Vec::new();
         if !self.primed {
-            blocks.push(json!({ "type": "text", "text": PRIMER }));
+            // The context, then how the work is shown, which is the same
+            // text the host's own loop puts in its system prompt.
+            blocks.push(json!({ "type": "text", "text": format!("{PRIMER}\n\n{PRESENTATION}") }));
             if self.subagents {
                 let mut guidance = SUBAGENT_PRIMER.to_string();
                 if !self.profile.subagent_hint.is_empty() {
@@ -704,6 +703,10 @@ impl Turn {
                             .map(str::to_string),
                         arguments,
                         agent,
+                        // The agent does not say where one of its model's
+                        // steps ends. A message of its own does: the calls
+                        // that follow one belong together.
+                        step: self.steps,
                     });
                 }
                 self.finish_if_done(id, update, emit);
@@ -987,12 +990,11 @@ mod tests {
         // the operator's words.
         let blocks = params["prompt"].as_array().unwrap();
         assert_eq!(blocks.len(), 3);
-        assert!(
-            blocks[0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("StackQL Workbench")
-        );
+        let context = blocks[0]["text"].as_str().unwrap();
+        assert!(context.contains("StackQL Workbench"));
+        // How the work is shown, and how to ask for a chart, come with it.
+        assert!(context.contains("How your work is shown"));
+        assert!(context.contains("```chart"));
         let guidance = blocks[1]["text"].as_str().unwrap();
         assert!(guidance.starts_with("Subagents:"));
         // What this agent needs to be told about its own subagents follows.
@@ -1096,18 +1098,24 @@ mod tests {
         let started = events
             .iter()
             .find_map(|e| match e {
-                AgentEvent::ToolCallStarted { id, tool, sql, .. } => {
-                    Some((id.clone(), tool.clone(), sql.clone()))
-                }
+                AgentEvent::ToolCallStarted {
+                    id,
+                    tool,
+                    sql,
+                    step,
+                    ..
+                } => Some((id.clone(), tool.clone(), sql.clone(), *step)),
                 _ => None,
             })
             .unwrap();
+        // The call follows the agent's first message, so it is of step one.
         assert_eq!(
             started,
             (
                 "t1".to_string(),
                 "run_select_query".to_string(),
-                Some("SHOW PROVIDERS".to_string())
+                Some("SHOW PROVIDERS".to_string()),
+                1
             )
         );
         let finished = events

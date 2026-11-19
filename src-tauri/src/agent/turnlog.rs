@@ -175,6 +175,7 @@ mod tests {
                 .map(str::to_string),
             arguments,
             agent: None,
+            step: 1,
         }
     }
 
@@ -241,6 +242,7 @@ mod tests {
             arguments: json!({ "provider": "nope" }),
             sql: None,
             agent: Some("github-count".into()),
+            step: 1,
         });
         turn.observe(&finished("c1", true, "no such provider"));
         // A result for a call that was never announced is still logged.
