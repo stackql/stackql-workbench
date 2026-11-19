@@ -347,11 +347,17 @@ impl DelegateSession {
         };
         match outcome {
             Some(Ok(result)) => {
+                // The agent adds its model calls up itself and reports the
+                // turn. Its input count holds what was read from the cache.
+                let count = |name: &str| {
+                    result
+                        .pointer(&format!("/usage/{name}"))
+                        .and_then(Value::as_u64)
+                };
                 summary.usage = Usage {
-                    input_tokens: result.pointer("/usage/inputTokens").and_then(Value::as_u64),
-                    output_tokens: result
-                        .pointer("/usage/outputTokens")
-                        .and_then(Value::as_u64),
+                    input_tokens: count("inputTokens"),
+                    output_tokens: count("outputTokens"),
+                    cached_input_tokens: count("cachedReadTokens"),
                 };
                 match result.get("stopReason").and_then(Value::as_str) {
                     Some("cancelled") => summary.stopped = true,
@@ -1064,7 +1070,8 @@ mod tests {
             .result(
                 prompt_id,
                 json!({ "stopReason": "end_turn",
-                        "usage": { "inputTokens": 1200, "outputTokens": 34 } }),
+                        "usage": { "inputTokens": 19353, "outputTokens": 92, "totalTokens": 19445,
+                            "thoughtTokens": 46, "cachedReadTokens": 9533, "cachedWriteTokens": 9805 } }),
             )
             .await;
 
@@ -1074,8 +1081,10 @@ mod tests {
         assert_eq!(summary.stop, StopReason::EndTurn);
         assert_eq!(summary.tool_calls, 1);
         assert_eq!(summary.steps, 2);
-        assert_eq!(summary.usage.input_tokens, Some(1200));
-        assert_eq!(summary.usage.output_tokens, Some(34));
+        // The shape the Copilot CLI sent when it was asked. See the spike report.
+        assert_eq!(summary.usage.input_tokens, Some(19_353));
+        assert_eq!(summary.usage.output_tokens, Some(92));
+        assert_eq!(summary.usage.cached_input_tokens, Some(9_533));
 
         let events = events.lock().unwrap().clone();
         let deltas: Vec<(&str, &str)> = events

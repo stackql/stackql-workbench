@@ -125,6 +125,11 @@ impl TurnLog {
                     "toolCalls": summary.tool_calls,
                     "stopped": summary.stopped,
                     "stop": summary.stop,
+                    // What the turn used, where the provider said. A count
+                    // it did not report is left out, not written as zero.
+                    "inputTokens": summary.usage.input_tokens,
+                    "outputTokens": summary.usage.output_tokens,
+                    "cachedInputTokens": summary.usage.cached_input_tokens,
                 }),
             ),
             Err(err) => self.log.error(
@@ -280,7 +285,11 @@ mod tests {
             tool_calls: 2,
             stopped: false,
             stop: StopReason::EndTurn,
-            usage: Usage::default(),
+            usage: Usage {
+                input_tokens: Some(19_353),
+                output_tokens: Some(92),
+                cached_input_tokens: None,
+            },
         }));
         turn.finished(&Err(HostError::Agent("The API key was rejected.".into())));
 
@@ -295,6 +304,10 @@ mod tests {
         assert_eq!(written[0]["level"], "warn");
         assert_eq!(written[1]["toolCalls"], 2);
         assert_eq!(written[1]["stop"]["kind"], "endTurn");
+        // What the turn used is on record. What was not reported is absent.
+        assert_eq!(written[1]["inputTokens"], 19_353);
+        assert_eq!(written[1]["outputTokens"], 92);
+        assert!(written[1].get("cachedInputTokens").is_none());
         assert_eq!(written[2]["level"], "error");
         assert_eq!(written[2]["kind"], "agent");
         assert_eq!(written[2]["error"], "The API key was rejected.");

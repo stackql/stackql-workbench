@@ -183,13 +183,25 @@ fn content_of(message: &Message) -> Value {
 }
 
 pub fn parse_response(reply: &Value) -> Result<ChatResponse, InferenceError> {
+    // The API counts the prompt, the reply and the model's thinking apart,
+    // and gives the total as their sum. Thinking is billed as output, so it
+    // is counted as output here. The prompt count already holds what was
+    // read from the cache.
+    let count = |name: &str| {
+        reply
+            .pointer(&format!("/usageMetadata/{name}"))
+            .and_then(Value::as_u64)
+    };
+    let sum = |parts: [Option<u64>; 2]| {
+        parts
+            .iter()
+            .any(Option::is_some)
+            .then(|| parts.iter().flatten().sum())
+    };
     let usage = Usage {
-        input_tokens: reply
-            .pointer("/usageMetadata/promptTokenCount")
-            .and_then(Value::as_u64),
-        output_tokens: reply
-            .pointer("/usageMetadata/candidatesTokenCount")
-            .and_then(Value::as_u64),
+        input_tokens: sum([count("promptTokenCount"), count("toolUsePromptTokenCount")]),
+        output_tokens: sum([count("candidatesTokenCount"), count("thoughtsTokenCount")]),
+        cached_input_tokens: count("cachedContentTokenCount"),
     };
 
     let Some(candidate) = reply.pointer("/candidates/0") else {
@@ -359,7 +371,7 @@ mod tests {
                 ]},
                 "finishReason": "STOP"
             }],
-            "usageMetadata": { "promptTokenCount": 120, "candidatesTokenCount": 30, "thoughtsTokenCount": 50 }
+            "usageMetadata": { "promptTokenCount": 120, "cachedContentTokenCount": 100, "candidatesTokenCount": 30, "thoughtsTokenCount": 50, "totalTokenCount": 200 }
         });
         let response = parse_response(&reply).unwrap();
         // Reasoning is not answer text.
@@ -370,7 +382,9 @@ mod tests {
         assert_eq!(response.tool_calls[1].name, "list_providers");
         assert_eq!(response.stop, StopReason::ToolUse);
         assert_eq!(response.usage.input_tokens, Some(120));
-        assert_eq!(response.usage.output_tokens, Some(30));
+        // Thinking is counted apart from the reply and billed as output.
+        assert_eq!(response.usage.output_tokens, Some(80));
+        assert_eq!(response.usage.cached_input_tokens, Some(100));
         // The signature survives in the kept reply.
         assert_eq!(
             response.raw.as_ref().unwrap()["parts"][2]["thoughtSignature"],

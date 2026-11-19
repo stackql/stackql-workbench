@@ -272,6 +272,7 @@ pub fn parse_response(reply: &Value) -> Result<ChatResponse, InferenceError> {
             .any(Option::is_some)
             .then(|| input_parts.iter().flatten().sum()),
         output_tokens: count("output_tokens"),
+        cached_input_tokens: count("cache_read_input_tokens"),
     };
 
     Ok(ChatResponse {
@@ -383,6 +384,8 @@ mod tests {
         // Cached and uncached input are added together.
         assert_eq!(response.usage.input_tokens, Some(912));
         assert_eq!(response.usage.output_tokens, Some(40));
+        // What was read from the cache is in the input, and also told apart.
+        assert_eq!(response.usage.cached_input_tokens, Some(900));
         // The thinking block survives in what is kept for replay.
         assert_eq!(response.raw.as_ref().unwrap()[0]["signature"], "sig-1");
     }

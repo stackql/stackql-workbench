@@ -512,7 +512,9 @@ impl AgentRuntime {
             };
 
             summary.steps += 1;
-            summary.usage = add_usage(summary.usage, reply.usage);
+            // A turn's use is that of every call to the model in it. Each
+            // call sends the conversation again, so the input adds up fast.
+            summary.usage = summary.usage.plus(reply.usage);
             summary.stop = reply.stop.clone();
             if !reply.text.trim().is_empty() {
                 emit(AgentEvent::AssistantText {
@@ -689,17 +691,6 @@ fn stopped_message() -> Message {
         text: "[The operator stopped this turn.]".to_string(),
         tool_calls: Vec::new(),
         raw: None,
-    }
-}
-
-fn add_usage(total: Usage, step: Usage) -> Usage {
-    let add = |a: Option<u64>, b: Option<u64>| match (a, b) {
-        (None, None) => None,
-        (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
-    };
-    Usage {
-        input_tokens: add(total.input_tokens, step.input_tokens),
-        output_tokens: add(total.output_tokens, step.output_tokens),
     }
 }
 
@@ -890,26 +881,6 @@ mod tests {
         let text = content_for_model(&result("", Some(json!({ "valid": true })), &[]));
         assert_eq!(text, "{\"valid\":true}");
         assert_eq!(content_for_model(&result("  ", None, &[])), "(no output)");
-    }
-
-    #[test]
-    fn usage_adds_up_across_steps() {
-        let total = add_usage(
-            Usage {
-                input_tokens: Some(10),
-                output_tokens: None,
-            },
-            Usage {
-                input_tokens: Some(5),
-                output_tokens: Some(7),
-            },
-        );
-        assert_eq!(total.input_tokens, Some(15));
-        assert_eq!(total.output_tokens, Some(7));
-        assert_eq!(
-            add_usage(Usage::default(), Usage::default()),
-            Usage::default()
-        );
     }
 
     fn call(id: &str, name: &str) -> ToolCall {

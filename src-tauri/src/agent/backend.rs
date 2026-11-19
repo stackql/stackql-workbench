@@ -81,11 +81,36 @@ pub enum StopReason {
     Other(String),
 }
 
+/// What a call to a model, or a whole turn, used. Each count is `None` when
+/// the provider did not report it, which is not the same as zero.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
+    /// Everything the model was sent, whether or not the provider read part
+    /// of it from its cache.
     pub input_tokens: Option<u64>,
+    /// Everything the model wrote, its thinking included where the provider
+    /// counts that apart.
     pub output_tokens: Option<u64>,
+    /// The part of the input the provider read from its cache, which it
+    /// bills at a lower rate. Already counted in `input_tokens`.
+    pub cached_input_tokens: Option<u64>,
+}
+
+impl Usage {
+    /// Adds the use of one call to a running total. A count stays `None`
+    /// until some call reports it.
+    pub fn plus(self, other: Self) -> Self {
+        let add = |a: Option<u64>, b: Option<u64>| match (a, b) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+        };
+        Self {
+            input_tokens: add(self.input_tokens, other.input_tokens),
+            output_tokens: add(self.output_tokens, other.output_tokens),
+            cached_input_tokens: add(self.cached_input_tokens, other.cached_input_tokens),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -208,6 +233,38 @@ pub fn classify_transport_error(err: &reqwest::Error) -> InferenceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_adds_up_across_the_calls_of_a_turn() {
+        let total = Usage {
+            input_tokens: Some(10),
+            output_tokens: None,
+            cached_input_tokens: None,
+        }
+        .plus(Usage {
+            input_tokens: Some(5),
+            output_tokens: Some(7),
+            cached_input_tokens: Some(4),
+        });
+        assert_eq!(total.input_tokens, Some(15));
+        assert_eq!(total.output_tokens, Some(7));
+        assert_eq!(total.cached_input_tokens, Some(4));
+        // What no call reported stays unknown. It does not become zero.
+        assert_eq!(Usage::default().plus(Usage::default()), Usage::default());
+    }
+
+    #[test]
+    fn usage_crosses_to_the_webview_in_camel_case() {
+        let usage = Usage {
+            input_tokens: Some(19_353),
+            output_tokens: Some(92),
+            cached_input_tokens: None,
+        };
+        assert_eq!(
+            serde_json::to_value(usage).unwrap(),
+            serde_json::json!({ "inputTokens": 19353, "outputTokens": 92, "cachedInputTokens": null })
+        );
+    }
 
     #[test]
     fn http_statuses_map_to_the_right_error() {

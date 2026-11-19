@@ -100,6 +100,7 @@ fn calls(calls: &[(&str, &str, Value)]) -> ChatResponse {
         usage: Usage {
             input_tokens: Some(100),
             output_tokens: Some(10),
+            cached_input_tokens: None,
         },
     }
 }
@@ -113,6 +114,7 @@ fn says(text: &str) -> ChatResponse {
         usage: Usage {
             input_tokens: Some(200),
             output_tokens: Some(20),
+            cached_input_tokens: Some(150),
         },
     }
 }
@@ -232,7 +234,10 @@ async fn a_turn_runs_tools_through_the_engine_and_feeds_the_results_back() {
     assert_eq!(summary.tool_calls, 2);
     assert!(!summary.stopped);
     assert_eq!(summary.stop, StopReason::EndTurn);
+    // Two calls to the model: one that asked for a tool, one that answered.
     assert_eq!(summary.usage.input_tokens, Some(300));
+    assert_eq!(summary.usage.output_tokens, Some(30));
+    assert_eq!(summary.usage.cached_input_tokens, Some(150));
 
     let events = events.lock().unwrap().clone();
     // A session was opened in the requested mode, on a revision with a handshake.

@@ -226,12 +226,18 @@ pub fn parse_response(reply: &Value) -> Result<ChatResponse, InferenceError> {
         }
     };
 
+    // `prompt_tokens` is the whole input and `completion_tokens` the whole
+    // output, reasoning included. A server that caches says how much of the
+    // input it read from its cache. A local server usually says none of it.
     let usage = Usage {
         input_tokens: reply
             .pointer("/usage/prompt_tokens")
             .and_then(Value::as_u64),
         output_tokens: reply
             .pointer("/usage/completion_tokens")
+            .and_then(Value::as_u64),
+        cached_input_tokens: reply
+            .pointer("/usage/prompt_tokens_details/cached_tokens")
             .and_then(Value::as_u64),
     };
 
@@ -336,7 +342,7 @@ mod tests {
                 },
                 "finish_reason": "tool_calls"
             }],
-            "usage": { "prompt_tokens": 100, "completion_tokens": 20 }
+            "usage": { "prompt_tokens": 100, "completion_tokens": 20, "prompt_tokens_details": { "cached_tokens": 64 } }
         });
         let response = parse_response(&reply).unwrap();
         assert_eq!(response.text, "");
@@ -346,6 +352,7 @@ mod tests {
         assert_eq!(response.stop, StopReason::ToolUse);
         assert_eq!(response.usage.input_tokens, Some(100));
         assert_eq!(response.usage.output_tokens, Some(20));
+        assert_eq!(response.usage.cached_input_tokens, Some(64));
     }
 
     #[test]
