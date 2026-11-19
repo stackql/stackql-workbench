@@ -163,6 +163,25 @@ jobs:
           # Nothing else is carried in the bundle that would have to be signed.
           find "$app/Contents" -type f \( -name '*.dylib' -o -name '*.so' \) -print
 
+      # The pages need a renderer of a certain age, and on a Mac the renderer
+      # is the one that macOS has. The bundle names the oldest macOS it runs
+      # on, so an older one refuses to open it. Both halves of the executable
+      # must be built for that version as well.
+      - name: Check the oldest macOS the app runs on
+        shell: bash
+        run: |
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app=$(ls -d "$bundle"/macos/*.app)
+          want=$(node -p "require('./src-tauri/tauri.conf.json').bundle.macOS.minimumSystemVersion")
+          declared=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")
+          echo "Wanted: $want"
+          echo "Declared in Info.plist: $declared"
+          [ "$declared" = "$want" ]
+          built=$(otool -l "$app/Contents/MacOS/stackql-workbench" \
+            | awk '$1 == "minos" {print $2}' | sort -u)
+          echo "Built for: $built"
+          [ "$built" = "$want" ]
+
       - uses: actions/upload-artifact@v7
         with:
           name: stackql-workbench-macos-universal

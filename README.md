@@ -201,7 +201,7 @@ The integration tests start a real `stackql` and are skipped when none is found.
 
 ### Test build for macOS
 
-CI builds the app for macOS on every run and keeps the disk image as the workflow artifact `stackql-workbench-macos-universal`. It runs on Apple Silicon and Intel. It is for testing and is not a release: the signature is ad hoc, with no Developer ID, and nothing is notarised.
+CI builds the app for macOS on every run and keeps the disk image as the workflow artifact `stackql-workbench-macos-universal`. It runs on Apple Silicon and Intel, on macOS 13 or later. It is for testing and is not a release: the signature is ad hoc, with no Developer ID, and nothing is notarised.
 
 To try it:
 
@@ -223,6 +223,8 @@ CI also keeps what the StackQL MSI and PKG are built from, on every run, as two 
 
 Neither is signed for release. The Windows executable has no signature and the Mac app has an ad hoc one, so the StackQL release signs both, and notarises the Mac app, before it ships them. Unpack the Mac app with `tar -xzf`, which keeps the links and permissions inside the bundle.
 
+The StackQL MSI is built for x64 and for arm64. This repository builds the Windows executable for x64 only, so the arm64 MSI has no Workbench of its own architecture yet.
+
 Both are built to stand on their own, and CI checks that they do.
 
 - The Windows executable carries its C runtime inside it. What it asks the system for is Windows itself: `kernel32.dll`, `user32.dll` and the like. CI reads the import tables of the executable with `scripts/check-exe-imports.js` and fails the build if a runtime library is among them.
@@ -231,14 +233,20 @@ Both are built to stand on their own, and CI checks that they do.
 One thing is not inside the Windows executable and cannot be: the page renderer, Microsoft's WebView2 runtime, which is a browser engine. The app uses the one Windows has. Microsoft says the runtime is included as part of Windows 11 and that the vast majority of Windows 10 devices already have it. It also says some devices may not, so there are two things to know.
 
 - Where no runtime is found, the app shows a dialog that says so, with the address of Microsoft's download page, and exits when the dialog is closed.
-- An MSI can install the runtime where it is missing. Microsoft documents the check and the installer. The check is a `pv` value that is not empty and not `0.0.0.0` under `SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` in `HKEY_LOCAL_MACHINE`, or under `Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` in `HKEY_CURRENT_USER`. The installer is the Evergreen bootstrapper, about 2 MB, run as `MicrosoftEdgeWebview2Setup.exe /silent /install`. It downloads the runtime, so it needs the network at install time.
+- Where it is missing, the MSI gives the operator the option to install it. The maintainer decided that on 20 November 2026. It is an option: nothing is installed unless the operator takes it. The MSI is built in the `stackql-windows-installer` repository, so that work is there, and it is not done yet.
+
+What the MSI needs for that is documented by Microsoft.
+
+- The check: the runtime is installed when a `pv` value that is not empty and not `0.0.0.0` is under `SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` in `HKEY_LOCAL_MACHINE`, or under `Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` in `HKEY_CURRENT_USER`.
+- The installer: the Evergreen bootstrapper, `MicrosoftEdgeWebview2Setup.exe`, run with `/silent /install`. Microsoft allows it to be packaged with an app. `https://go.microsoft.com/fwlink/p/?LinkId=2124703` served it, at 1.9 MB, on 20 November 2026.
+- The bootstrapper downloads the runtime, so the option needs the network at install time.
 
 The installers do not ship the runtime itself. The maintainer decided that on 20 November 2026: the binaries stay small and run on most modern machines. For a machine that must rely on nothing from the system there is still a way, which is to put Microsoft's Fixed Version runtime beside the app:
 
 - Get the Fixed Version runtime for x64 from Microsoft's WebView2 download page. It comes as a `.cab` to unpack.
 - Install the unpacked folder beside `stackql-workbench.exe`, renamed to `WebView2Runtime`.
 
-When that folder is there the app uses it and does not look at what the system has. When it is not, the app uses the system's runtime. Nothing else is configured, so the same executable serves both. The folder is large: the runtime installed on the machine this was measured on is 878 MB in 918 files. It is also a browser engine at one fixed version, so a security update to it means a new installer, where the system's runtime is kept up to date by Windows. The app only ever loads its own pages from inside the executable, which limits what an out-of-date renderer is exposed to. macOS has nothing of the kind to ship, because its renderer is part of the system. That renderer is as old as the macOS it is on. The app sets no minimum macOS version yet, so the bundle declares Tauri's default of 10.13, while the styling library the pages use needs the WebKit of Safari 16.4, from March 2023.
+When that folder is there the app uses it and does not look at what the system has. When it is not, the app uses the system's runtime. Nothing else is configured, so the same executable serves both. The folder is large: the runtime installed on the machine this was measured on is 878 MB in 918 files. It is also a browser engine at one fixed version, so a security update to it means a new installer, where the system's runtime is kept up to date by Windows. The app only ever loads its own pages from inside the executable, which limits what an out-of-date renderer is exposed to. macOS has nothing of the kind to ship, because its renderer is part of the system. That renderer is as old as the macOS it is on, so the app needs macOS 13 or later. The maintainer decided that on 20 November 2026. The bundle declares it as its minimum, and an older macOS refuses to open the app. The reason is the styling library the pages use, which needs the WebKit of Safari 16.4, from March 2023. Safari 16.4 came to macOS 13 in an update, so a Mac that is still on the first releases of macOS 13 opens the app with a renderer older than that.
 
 To fetch them from the latest run on `main`: `gh run download --repo stackql/stackql-workbench --branch main --name stackql-workbench-windows-x64`, and the same with the other name. GitHub keeps a workflow artifact for 90 days. A build to be shipped should come from a tagged release, which this repository does not make yet.
 
@@ -315,7 +323,7 @@ Milestones are delivered in order where they depend on each other. Each one leav
 
 StackQL Workbench has no installer of its own. It ships inside the StackQL installers, beside the `stackql` binary.
 
-- Windows: the StackQL MSI installs `stackql-workbench.exe` next to `stackql.exe` and adds a Start Menu entry. The executable needs no runtime installed. The page is drawn by the Microsoft WebView2 runtime that Windows has, which is part of Windows 11 and already on most Windows 10 machines. The MSI does not ship it. See "What the installers take".
+- Windows: the StackQL MSI installs `stackql-workbench.exe` next to `stackql.exe` and adds a Start Menu entry. The executable needs no runtime installed. The page is drawn by the Microsoft WebView2 runtime that Windows has, which is part of Windows 11 and already on most Windows 10 machines. The MSI does not ship it, and is to offer to install it where it is missing. See "What the installers take".
 - The app uses the `stackql` it was installed with: on Windows the one that sits beside it, and on macOS the command the PKG puts in `/usr/local/bin`, or an engine inside the app bundle if the PKG ever puts one there. That is the pair that was built and tested together, so nothing on the machine replaces it except a path the operator sets under Settings after the install. A `STACKQL_BIN` variable does not, and when one is set the status bar says it is not used. Neither installer has anything to configure for this.
 - Under `Program Files` the folder beside the app cannot be written to, so the engine keeps its provider cache in the app data directory. A first run lists no providers.
 - macOS: the StackQL PKG installs `StackQL Workbench.app` to `/Applications` alongside the `stackql` CLI.
