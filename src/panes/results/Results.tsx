@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { host, toHostError } from '../../host';
 import { copyText } from '../../host/clipboard';
 import { exportFileName, toCsv, toJson, toMarkdownTable } from '../../lib/exportResult';
@@ -11,6 +11,7 @@ import {
   type RunState,
   type StatementResult,
 } from '../../lib/results';
+import { nextSort, sortRows, type SortState } from '../../lib/sortRows';
 import { ContextMenu } from '../../ui/ContextMenu';
 import { IconButton } from '../../ui/IconButton';
 import { Download, Panel, Spinner, Warning } from '../../ui/icons';
@@ -42,6 +43,10 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
   // What the last export or copy did.
   const [note, setNote] = useState<{ text: string; failed: boolean } | null>(null);
 
+  // The sort belongs to one result set. It is kept with the statement it
+  // was set on, so another result set starts in the order its rows arrived.
+  const [sorted, setSorted] = useState<{ statement: number; sort: SortState } | null>(null);
+
   const withResults = run.statements.filter((s) => s.columns !== null && s.columns.length > 0);
   const statement =
     (picked !== null ? run.statements.find((s) => s.index === picked) : undefined) ??
@@ -50,15 +55,19 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
   const hasGrid = columns !== null && columns.length > 0;
   const attention = attentionCount(run);
 
-  const selectedValue =
-    selected && statement ? (statement.rows[selected.row]?.[selected.column] ?? null) : null;
+  const sort = statement && sorted?.statement === statement.index ? sorted.sort : null;
+  const statementRows = statement?.rows;
+  // What the grid draws, and so what a cell reference and an export mean.
+  const rows = useMemo(() => sortRows(statementRows ?? [], sort), [statementRows, sort]);
+
+  const selectedValue = selected ? (rows[selected.row]?.[selected.column] ?? null) : null;
   const selectedColumn = selected && columns ? (columns[selected.column] ?? '') : '';
 
   const save = (kind: 'csv' | 'json') => {
     if (!statement || !columns) {
       return;
     }
-    const text = kind === 'csv' ? toCsv(columns, statement.rows) : toJson(columns, statement.rows);
+    const text = kind === 'csv' ? toCsv(columns, rows) : toJson(columns, rows);
     host.saveTextFile(exportFileName(kind, new Date()), kind, text).then(
       (path) => {
         if (path !== null) {
@@ -75,7 +84,6 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
     if (!statement || !columns) {
       return;
     }
-    const rows = statement.rows;
     void copyText(toMarkdownTable(columns, rows)).then((ok) => {
       setNote(
         ok
@@ -220,12 +228,19 @@ function ResultsBody({ run, onStopWaiting }: ResultsProps) {
               <div className="min-w-0 flex-1">
                 <Grid
                   columns={columns}
-                  rows={statement.rows}
+                  rows={rows}
                   selected={selected}
                   onSelect={setSelected}
                   onOpen={(cell) => {
                     setSelected(cell);
                     setViewerOpen(true);
+                  }}
+                  sort={sort}
+                  onSort={(column) => {
+                    const next = nextSort(sort, column);
+                    setSorted(next ? { statement: statement.index, sort: next } : null);
+                    // A cell reference is a place in the order drawn, which just changed.
+                    setSelected(null);
                   }}
                 />
               </div>

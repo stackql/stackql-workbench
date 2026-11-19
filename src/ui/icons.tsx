@@ -235,6 +235,31 @@ export const Terminal = (p: IconProps) => (
   </Svg>
 );
 
+export const SortUp = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7" />
+  </Svg>
+);
+
+export const SortDown = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 3.5v9M4.5 9 8 12.5 11.5 9" />
+  </Svg>
+);
+
+export const Chart = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 2.5v11h11" />
+    <path d="M5.5 11V8M8.5 11V5M11.5 11V7" />
+  </Svg>
+);
+
+export const Code = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m5.5 4.5-3.5 3.5 3.5 3.5M10.5 4.5 14 8l-3.5 3.5" />
+  </Svg>
+);
+
 export const Search = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="7" cy="7" r="4" />

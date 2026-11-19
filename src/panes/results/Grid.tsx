@@ -6,9 +6,12 @@ import {
   type ColumnDef,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useMemo, useRef } from 'react';
+import { useMemo, useState } from 'react';
 import type { Row } from '../../host/types';
 import { cellPreview, looksLikeJson } from '../../lib/cell';
+import type { SortState } from '../../lib/sortRows';
+import { SortDown, SortUp } from '../../ui/icons';
+import { useWidth } from '../../ui/useWidth';
 
 const ROW_HEIGHT = 24;
 const HEADER_HEIGHT = 26;
@@ -26,12 +29,22 @@ export interface CellRef {
 
 interface GridProps {
   columns: string[];
+  /** The rows in the order to draw them. Sorting is done by whoever owns the rows. */
   rows: Row[];
-  selected: CellRef | null;
-  onSelect: (cell: CellRef) => void;
+  selected?: CellRef | null;
+  onSelect?: (cell: CellRef) => void;
   /** Called when the operator asks to see a cell in full. */
-  onOpen: (cell: CellRef) => void;
+  onOpen?: (cell: CellRef) => void;
+  /** The column the rows are sorted by, if any. */
+  sort?: SortState | null;
+  /** Called with a column's position when its header is clicked. Without it, headers do nothing. */
+  onSort?: (column: number) => void;
+  /** Widens the columns to fill the space when they would not, until one is dragged. */
+  fill?: boolean;
 }
+
+const ARIA_SORT = { asc: 'ascending', desc: 'descending' } as const;
+const SCROLL_BAR_WIDTH = 14;
 
 const SAMPLE_ROWS = 50;
 const CHAR_WIDTH = 7.3;
@@ -47,7 +60,16 @@ function initialWidth(name: string, index: number, sample: Row[]): number {
 }
 
 /** A read-only grid. Rows are virtualised, so only the visible ones are in the DOM. */
-export function Grid({ columns, rows, selected, onSelect, onOpen }: GridProps) {
+export function Grid({
+  columns,
+  rows,
+  selected,
+  onSelect,
+  onOpen,
+  sort,
+  onSort,
+  fill = false,
+}: GridProps) {
   // Sized from the first rows. A width the operator sets by dragging is kept
   // by the table and wins over these.
   const columnDefs = useMemo<ColumnDef<GridFeatures, Row>[]>(() => {
@@ -72,7 +94,9 @@ export function Grid({ columns, rows, selected, onSelect, onOpen }: GridProps) {
     (state) => state,
   );
 
-  const scroller = useRef<HTMLDivElement>(null);
+  const [scroller, available] = useWidth<HTMLDivElement>();
+  // Set once the operator drags a column. From then on widths are theirs.
+  const [resized, setResized] = useState(false);
   // The React Compiler is not used in this project, so its warning about this
   // hook does not apply.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -85,7 +109,13 @@ export function Grid({ columns, rows, selected, onSelect, onOpen }: GridProps) {
   });
 
   const headers = table.getHeaderGroups()[0]?.headers ?? [];
-  const widths = headers.map((header) => header.getSize());
+  const sizes = headers.map((header) => header.getSize());
+  const natural = sizes.reduce((sum, width) => sum + width, 0);
+  // Columns narrower than the space they are in are widened to fill it, each
+  // in proportion, with room left for a scroll bar.
+  const room = available - ROW_NUMBER_WIDTH - SCROLL_BAR_WIDTH;
+  const stretch = fill && !resized && natural > 0 && natural < room ? room / natural : 1;
+  const widths = sizes.map((size) => Math.floor(size * stretch));
   const totalWidth = ROW_NUMBER_WIDTH + widths.reduce((sum, width) => sum + width, 0);
 
   return (
@@ -102,30 +132,55 @@ export function Grid({ columns, rows, selected, onSelect, onOpen }: GridProps) {
             role="columnheader"
             aria-label="Row number"
           />
-          {headers.map((header, index) => (
-            <div
-              key={header.id}
-              role="columnheader"
-              title={columns[index]}
-              className="relative flex shrink-0 items-center border-r border-line px-2"
-              style={{ width: widths[index] }}
-            >
-              <span className="selectable truncate">{columns[index]}</span>
+          {headers.map((header, index) => {
+            const direction = sort?.column === index ? sort.direction : null;
+            return (
               <div
-                role="separator"
-                aria-orientation="vertical"
-                aria-label={`Resize column ${columns[index] ?? ''}`}
-                onMouseDown={header.getResizeHandler()}
-                onTouchStart={header.getResizeHandler()}
-                onDoubleClick={() => {
-                  header.column.resetSize();
-                }}
-                className={`absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-accent/60 ${
-                  header.column.getIsResizing() ? 'bg-accent' : ''
-                }`}
-              />
-            </div>
-          ))}
+                key={header.id}
+                role="columnheader"
+                aria-sort={direction ? ARIA_SORT[direction] : onSort ? 'none' : undefined}
+                title={columns[index]}
+                className="relative flex shrink-0 items-center border-r border-line"
+                style={{ width: widths[index] }}
+              >
+                {onSort ? (
+                  <button
+                    type="button"
+                    className="flex h-full min-w-0 flex-1 items-center gap-1 px-2 text-left font-semibold hover:bg-surface-sunken"
+                    title={`${columns[index] ?? ''}: click to sort`}
+                    onClick={() => {
+                      onSort(index);
+                    }}
+                  >
+                    <span className="truncate">{columns[index]}</span>
+                    {direction === 'asc' && <SortUp className="shrink-0 text-accent" />}
+                    {direction === 'desc' && <SortDown className="shrink-0 text-accent" />}
+                  </button>
+                ) : (
+                  <span className="selectable truncate px-2">{columns[index]}</span>
+                )}
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={`Resize column ${columns[index] ?? ''}`}
+                  onMouseDown={(event) => {
+                    setResized(true);
+                    header.getResizeHandler()(event);
+                  }}
+                  onTouchStart={(event) => {
+                    setResized(true);
+                    header.getResizeHandler()(event);
+                  }}
+                  onDoubleClick={() => {
+                    header.column.resetSize();
+                  }}
+                  className={`absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-accent/60 ${
+                    header.column.getIsResizing() ? 'bg-accent' : ''
+                  }`}
+                />
+              </div>
+            );
+          })}
         </div>
 
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
@@ -165,10 +220,10 @@ export function Grid({ columns, rows, selected, onSelect, onOpen }: GridProps) {
                       }`}
                       style={{ width }}
                       onClick={() => {
-                        onSelect({ row: item.index, column });
+                        onSelect?.({ row: item.index, column });
                       }}
                       onDoubleClick={() => {
-                        onOpen({ row: item.index, column });
+                        onOpen?.({ row: item.index, column });
                       }}
                     >
                       {cellPreview(value)}
