@@ -221,7 +221,19 @@ CI also keeps what the StackQL MSI and PKG are built from, on every run, as two 
 | `stackql-workbench-windows-x64` | `stackql-workbench.exe`, the optimised build | The MSI, which installs it beside `stackql.exe` |
 | `stackql-workbench-macos-universal-app` | `stackql-workbench-macos-universal.app.tar.gz`, the app bundle for Apple Silicon and Intel | The PKG, which installs it to `/Applications` |
 
-Neither is signed for release. The Windows executable has no signature and the Mac app has an ad hoc one, so the StackQL release signs both, and notarises the Mac app, before it ships them. The Windows executable needs nothing installed beside it but the Microsoft WebView2 runtime. Unpack the Mac app with `tar -xzf`, which keeps the links and permissions inside the bundle.
+Neither is signed for release. The Windows executable has no signature and the Mac app has an ad hoc one, so the StackQL release signs both, and notarises the Mac app, before it ships them. Unpack the Mac app with `tar -xzf`, which keeps the links and permissions inside the bundle.
+
+Both are built to stand on their own, and CI checks that they do.
+
+- The Windows executable carries its C runtime inside it. What it asks the system for is Windows itself: `kernel32.dll`, `user32.dll` and the like. CI reads the import tables of the executable with `scripts/check-exe-imports.js` and fails the build if a runtime library is among them.
+- The Mac app links only to what is part of macOS: system frameworks and libraries under `/usr/lib`. CI checks that with `otool`.
+
+One thing is not inside the Windows executable and cannot be: the page renderer, Microsoft's WebView2 runtime, which is a browser engine. Windows 11 has it built in, and Windows 10 gets it with Edge. An installer that must rely on nothing from the system ships it with the app:
+
+- Get the Fixed Version runtime for x64 from Microsoft's WebView2 download page. It comes as a `.cab` to unpack.
+- Install the unpacked folder beside `stackql-workbench.exe`, renamed to `WebView2Runtime`.
+
+When that folder is there the app uses it and does not look at what the system has. When it is not, the app uses the system's runtime. Nothing else is configured, so the same executable serves both. The folder is large: the runtime installed on the machine this was measured on is 878 MB in 918 files. It is also a browser engine at one fixed version, so a security update to it means a new installer, where the system's runtime is kept up to date by Windows. The app only ever loads its own pages from inside the executable, which limits what an out-of-date renderer is exposed to. macOS has nothing of the kind to ship, because its renderer is part of the system.
 
 To fetch them from the latest run on `main`: `gh run download --repo stackql/stackql-workbench --branch main --name stackql-workbench-windows-x64`, and the same with the other name. GitHub keeps a workflow artifact for 90 days. A build to be shipped should come from a tagged release, which this repository does not make yet.
 
@@ -298,7 +310,7 @@ Milestones are delivered in order where they depend on each other. Each one leav
 
 StackQL Workbench has no installer of its own. It ships inside the StackQL installers, beside the `stackql` binary.
 
-- Windows: the StackQL MSI installs `stackql-workbench.exe` next to `stackql.exe` and adds a Start Menu entry. The app needs the Microsoft WebView2 runtime, which is present on Windows 11.
+- Windows: the StackQL MSI installs `stackql-workbench.exe` next to `stackql.exe` and adds a Start Menu entry. The executable needs no runtime installed. The page is drawn by the Microsoft WebView2 runtime, which is part of Windows 11, or by one the MSI ships in a `WebView2Runtime` folder beside the app. See "What the installers take".
 - The app uses the `stackql` it was installed with: on Windows the one that sits beside it, and on macOS the command the PKG puts in `/usr/local/bin`, or an engine inside the app bundle if the PKG ever puts one there. That is the pair that was built and tested together, so nothing on the machine replaces it except a path the operator sets under Settings after the install. A `STACKQL_BIN` variable does not, and when one is set the status bar says it is not used. Neither installer has anything to configure for this.
 - Under `Program Files` the folder beside the app cannot be written to, so the engine keeps its provider cache in the app data directory. A first run lists no providers.
 - macOS: the StackQL PKG installs `StackQL Workbench.app` to `/Applications` alongside the `stackql` CLI.

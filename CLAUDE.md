@@ -37,6 +37,8 @@ What has and has not been run:
 - The Help menu's links have not been opened by a test. The address each one opens is tested. Help > Show Log File has not been clicked either, since it opens a window on the desktop. The log file it shows was read after real turns.
 - The conversation layout, the charts and the sortable table were driven in the built app on Windows in both themes, with a scripted model against the real engine: a declined approval, a call that failed and was not listed, each chart type, a chart that could not be drawn, sorting, and a CSV saved through the save dialog. Two turns were then run for real through the Copilot CLI 1.0.114 on `claude-haiku-4.5`. In the first the model wrote a chart block from the guidance on its first try. In the second three of its calls failed on the way: none was listed, and all three were in the log with their statement or arguments. No API key backend has drawn a chart from a real model.
 - Which engine an installed app starts was checked on Windows with a build of the app and a copy of `stackql.exe` in one folder, the way the MSI lays them out. With nothing set it started the engine beside it. With `STACKQL_BIN` naming another engine, and with it pointing nowhere, it still did, and said the variable was not used. With a path in settings it started that engine, and with a path in settings that pointed nowhere it stopped with the reason. The folder was one an ordinary account can write to, so the fallback of the data folder under `Program Files` was not part of this. The macOS rule has run only as unit tests.
+- What the Windows executable asks the system for was read from its import tables before and after the C runtime was linked in. Before, it asked for seven libraries of the Universal C runtime. After, for 19 libraries that are all Windows itself.
+- The page renderer was checked on Windows 11 with a build of the app in a folder of its own. With nothing beside it, the renderer process ran from the system's WebView2. With a copy of that runtime in a `WebView2Runtime` folder beside it, the renderer process ran from that folder and the app came up with its engine. With a `WebView2Runtime` folder that held no runtime, the system's was used. The copy was of the runtime Windows had installed, version 157, not of Microsoft's Fixed Version package, which has the same layout and was not downloaded. No machine without a WebView2 runtime was tried.
 - The token counts were seen in the built app with a scripted model, and for real through the Copilot CLI: one prompt to a probe to see what the CLI sends, and one turn through the app, which showed the count on the steps line and in the log. The counts of Gemini, Anthropic and an OpenAI-compatible server are read as their documentation describes and tested against stubs, not against the real services.
 - The supervisor's tests see a child end by waiting on a handle to it on Windows, and with `kill -0` on Unix. They used to ask `tasklist`, which on a busy machine could use up the time a test allowed. They passed 30 runs in a row with every core busy. With twice as many busy loops as cores a different test, `an_unexpected_exit_is_reported_with_its_code`, missed its 10 second limit twice in 30 runs.
 
@@ -124,9 +126,11 @@ stackql-workbench/
       config/           settings
       ipc/              command and event definitions, saving an export, the app's own links
       applog.rs         the app's own log
+      webview_runtime.rs  using a page renderer shipped beside the app, on Windows
+    .cargo/             build flags: the C runtime linked in on Windows
     examples/           pgwire_spike and mcp_spike, the probes behind the spike reports
     tests/              integration tests against a real stackql
-  scripts/              test launcher
+  scripts/              test launcher, the check of what a Windows executable asks the system for
   docs/                 design notes and spike reports
 ```
 
@@ -169,6 +173,10 @@ Things to know about them:
 - The engine's `--approot` is `.stackql` beside the Workbench executable. For a build from this repository that is `src-tauri/target/release/.stackql`, or `target/debug/.stackql` under `npm run tauri dev`. Where that folder cannot be written to, the fallback is `<app data dir>/engine`, which on Windows is `%APPDATA%\io.stackql.workbench\engine`. The operator can name another folder in Settings.
 - Settings are in `<app config dir>/settings.json`. The agent audit log is in `<app data dir>/audit` and the operator's statement history in `<app data dir>/history.jsonl`. Those two do not move with the engine's data folder.
 - The app's own log is in `<app data dir>/logs`, one file for each run, named `stackql_workbench_<UTC time>.log`. The host writes it and nothing reads it back. It is apart from the engine's audit log, which the engine writes. The 20 newest files are kept.
+- The binaries are built to need nothing from the system that has to be installed. The maintainer asked for that on 19 November 2026.
+  - Windows: the C runtime is linked in whole, with `+crt-static` in `src-tauri/.cargo/config.toml`. Tauri's own default links the Visual C++ runtime in and leaves the Universal C runtime to Windows, and it would undo the flag for that part, so `build.windows.staticVCRuntime` is `false` in `tauri.conf.json`. Keep the two together. `node scripts/check-exe-imports.js <exe>` reads the import tables and fails on a runtime library. CI runs it on the optimised build.
+  - macOS: the app links only to system frameworks and libraries under `/usr/lib`. CI checks that with `otool`.
+  - The WebView2 runtime is the one thing a Windows executable cannot carry. `webview_runtime.rs` uses a runtime in a `WebView2Runtime` folder beside the executable when there is one, by setting the loader's variable before anything else runs, and the system's runtime otherwise. Which was used is in the app's log. A runtime beside the app wins over a variable that was already set, the same rule the engine follows.
 - To run a build beside an installed copy without sharing its settings, history and logs, give it another identifier: `npm run tauri build -- --debug --no-bundle --config <file>` with a file that holds `{ "identifier": "io.stackql.workbench.dev" }`. The app data and config directories are named after the identifier.
 - One test writes and removes a throwaway entry in the real OS keychain. It skips itself where no keychain can be opened.
 - An editor's language server can build in the same `target` directory and hold a file the build needs, which shows up as linker error `LNK1104` on Windows. Running the command again clears it.
@@ -210,6 +218,7 @@ One supervisor owns every child process.
 - The watchdog script must stay POSIX. `kill -s TERM -- -PGID` works in every `/bin/sh` tried. `kill -TERM -- -PGID` does not.
 - Start console children with `CREATE_NO_WINDOW` on Windows, otherwise a console window flashes up.
 - Wait for readiness with a timeout. Surface failures in the UI with the captured stderr.
+- The port is chosen first and given to the engine after, and something else can take it in between. The engine then exits at once, with exit code 0. The host starts it again on a fresh port, up to three times, before it reports a failure. An engine that is running and does not answer is not started again. This showed up in CI, where tests start engines side by side.
 - Capture stderr of every child. For a stdio MCP process, stdout carries protocol frames only.
 
 ### `stackql srv` (human channel)
@@ -437,7 +446,7 @@ This applies to docs, comments, commit messages and UI copy.
 Raise these with the maintainer when the work reaches them. Do not decide them alone.
 
 - How Workbench versions are pinned to engine releases, and the minimum engine version check at startup.
-- How the MSI handles a missing WebView2 runtime on older Windows versions.
+- Whether the MSI ships Microsoft's Fixed Version WebView2 runtime beside the app. The maintainer wants the binaries to need nothing from the system. The executable now does not, and the app uses a `WebView2Runtime` folder beside it when there is one. Shipping that folder adds several hundred megabytes and makes the renderer's security updates a matter of new installers. Without it the app relies on the runtime Windows has.
 - How a build that ships is released from this repository: a tag and a release whose files the StackQL release fetches, in place of workflow artifacts that expire.
 - Whether `srv` should later co-host the MCP server so the IDE and the agent share one engine session.
 - Whether loopback pg wire needs TLS with a per-launch client certificate.
