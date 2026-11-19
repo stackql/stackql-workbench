@@ -16,6 +16,7 @@ pub mod library;
 pub mod query;
 pub mod secrets;
 pub mod util;
+pub mod webview_runtime;
 
 use std::sync::Arc;
 
@@ -33,7 +34,10 @@ use crate::ipc::AppState;
 use crate::library::Library;
 use crate::secrets::{KeychainStore, MemoryStore, SecretStore};
 
-fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+fn setup(
+    app: &tauri::App,
+    bundled_webview: Option<&std::path::Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let config_dir = app.path().app_config_dir()?;
     let data_dir = app.path().app_data_dir()?;
     let cache_dir = app.path().app_cache_dir()?;
@@ -56,6 +60,17 @@ fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // The app's own log, one file for each run. It is apart from the
     // engine's audit log, which the engine writes.
     let log = Arc::new(AppLog::start(&data_dir.join("logs")));
+    // On Windows the page renderer is either the one shipped beside the app
+    // or the system's. Which one is worth having on record.
+    if cfg!(windows) {
+        log.info(
+            "webview_runtime",
+            serde_json::json!({
+                "source": if bundled_webview.is_some() { "beside the app" } else { "system" },
+                "folder": bundled_webview.map(|folder| folder.display().to_string()),
+            }),
+        );
+    }
 
     // Forward every status change to the webview, and note in the log when
     // the engine comes up or fails to.
@@ -136,12 +151,16 @@ fn log_engine_state(log: &AppLog, status: &EngineStatus) {
 
 /// Starts the app. Does not return until the app exits.
 pub fn run() {
+    // First, before anything can start a thread: use the page renderer that
+    // was shipped beside the app, when there is one.
+    let bundled_webview = webview_runtime::use_bundled();
+
     let built = tauri::Builder::default()
         // The save dialog, used from the host only. The webview has no access to it.
         .plugin(tauri_plugin_dialog::init())
         // Opens the Help menu's links in the browser, from the host only.
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| setup(app))
+        .setup(move |app| setup(app, bundled_webview.as_deref()))
         .invoke_handler(tauri::generate_handler![
             ipc::engine_status,
             ipc::engine_restart,
