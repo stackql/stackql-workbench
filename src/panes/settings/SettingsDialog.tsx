@@ -140,8 +140,8 @@ export function SettingsDialog({ status, onClose, section, children }: SettingsD
             stackql location
           </label>
           <p className="mb-1 text-ink-muted">
-            Leave empty to search: the STACKQL_BIN variable, beside this app, the usual install
-            locations, then PATH.
+            Leave empty to use the engine installed with this app. Where there is none, the
+            STACKQL_BIN variable is tried, then the usual install locations, then PATH.
           </p>
           <input
             id={pathId}

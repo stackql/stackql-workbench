@@ -116,6 +116,7 @@ fn log_engine_state(log: &AppLog, status: &EngineStatus) {
             "engine_running",
             serde_json::json!({
                 "location": status.location,
+                "foundVia": status.location_source,
                 "version": status.version,
                 "endpoint": status.endpoint,
                 "dataFolder": status.data_folder,

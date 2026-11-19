@@ -266,12 +266,14 @@ impl LocalConnection {
 
         // 1. Find the binary.
         let inputs = Inputs::from_environment(settings.engine_path.as_ref().map(PathBuf::from));
-        let Resolved { path, source } = match discovery::resolve(&inputs, |p| p.is_file()) {
+        let found: Resolved = match discovery::resolve(&inputs, |p| p.is_file()) {
             Ok(found) => found,
             Err(err) => return fail(status, err.to_string(), Vec::new()),
         };
+        // Says so when a variable the operator set was passed over.
+        status.location_source = Some(found.found_via());
+        let path = found.path;
         status.location = Some(path.display().to_string());
-        status.location_source = Some(source.label().to_string());
         self.shared.set_status(status.clone());
 
         // 2. Check it is stackql and read its version.

@@ -75,10 +75,7 @@ impl Defaults {
 /// breaks its signature, and the bundle is replaced whole on update.
 pub fn beside_executable(exe: &Path) -> Option<PathBuf> {
     let dir = exe.parent().filter(|dir| !dir.as_os_str().is_empty())?;
-    let in_bundle = dir
-        .ancestors()
-        .any(|part| part.extension().is_some_and(|ext| ext == "app"));
-    if in_bundle {
+    if super::in_app_bundle(exe) {
         return None;
     }
     Some(dir.join(FOLDER_NAME))
