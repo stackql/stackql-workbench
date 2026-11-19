@@ -37,6 +37,9 @@ const READY_POLL: Duration = Duration::from_millis(50);
 /// One connect attempt during the readiness check. Kept short because a
 /// refused loopback connect is retried by Windows for about half a second.
 const READY_ATTEMPT: Duration = Duration::from_millis(300);
+/// How many times the engine is started, each time on a fresh port, when it
+/// exits at once.
+const START_ATTEMPTS: usize = 3;
 const LOG_TAIL_LINES: usize = 40;
 
 /// What a statement needs from a running engine.
@@ -299,45 +302,58 @@ impl LocalConnection {
         self.shared.set_status(status.clone());
         let approot = chosen.path;
 
-        // 4. Start it on a free loopback port.
-        let port = match pick_free_port() {
-            Ok(port) => port,
-            Err(err) => return fail(status, format!("No free port: {err}"), Vec::new()),
-        };
-        let spec = ChildSpec {
-            program: path.clone(),
-            args: self.srv_args(port, &approot, settings.env_file.as_deref()),
-            // The engine reads provider credentials from its environment.
-            // Until the keychain store exists, the app's environment is the
-            // base and an operator-supplied --env.file adds to it. On macOS
-            // an app started from Finder has a nearly empty environment, so
-            // the env file is the dependable route there.
-            env: EnvSpec {
-                inherit: true,
-                vars: Vec::new(),
-            },
-            cwd: approot.clone(),
-            stdio: StdioMode::Detached,
-        };
-        let mut running = match self.supervisor.spawn(&spec) {
-            Ok(running) => running,
-            Err(err) => return fail(status, err.to_string(), Vec::new()),
-        };
+        // 4. Start it on a free loopback port, and 5. wait until it answers.
+        //
+        // The port is chosen first and given to the engine after, and in
+        // between something else can take it: another copy of the app, or
+        // another engine starting at the same moment. The engine then exits
+        // at once. That is not a reason to give up, so a fresh port is tried
+        // a few times before the start is called a failure.
+        let mut attempt = 0;
+        let (port, running) = loop {
+            attempt += 1;
+            let port = match pick_free_port() {
+                Ok(port) => port,
+                Err(err) => return fail(status, format!("No free port: {err}"), Vec::new()),
+            };
+            let spec = ChildSpec {
+                program: path.clone(),
+                args: self.srv_args(port, &approot, settings.env_file.as_deref()),
+                // The engine reads provider credentials from its environment.
+                // Until the keychain store exists, the app's environment is
+                // the base and an operator-supplied --env.file adds to it. On
+                // macOS an app started from Finder has a nearly empty
+                // environment, so the env file is the dependable route there.
+                env: EnvSpec {
+                    inherit: true,
+                    vars: Vec::new(),
+                },
+                cwd: approot.clone(),
+                stdio: StdioMode::Detached,
+            };
+            let mut running = match self.supervisor.spawn(&spec) {
+                Ok(running) => running,
+                Err(err) => return fail(status, err.to_string(), Vec::new()),
+            };
 
-        // 5. Wait until it answers.
-        status.endpoint = Some(format!("127.0.0.1:{port}"));
-        match wait_ready(port, &running).await {
-            Ok(reported) => {
-                if !reported.is_empty() {
-                    status.version = Some(reported);
+            status.endpoint = Some(format!("127.0.0.1:{port}"));
+            match wait_ready(port, &running).await {
+                Ok(reported) => {
+                    if !reported.is_empty() {
+                        status.version = Some(reported);
+                    }
+                    break (port, running);
+                }
+                Err(failure) if try_another_port(&failure, attempt) => {
+                    running.stop().await;
+                }
+                Err(failure) => {
+                    let tail = running.stderr.tail(LOG_TAIL_LINES);
+                    running.stop().await;
+                    return fail(status, failure.into_reason(), tail);
                 }
             }
-            Err(reason) => {
-                let tail = running.stderr.tail(LOG_TAIL_LINES);
-                running.stop().await;
-                return fail(status, reason, tail);
-            }
-        }
+        };
 
         // 6. Publish, and watch for it going away.
         *lock(&self.shared.endpoint) = Some(Endpoint {
@@ -384,16 +400,44 @@ impl LocalConnection {
     }
 }
 
+/// Why the engine did not become ready.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NotReady {
+    /// It exited. The usual reason is that the port chosen for it was taken
+    /// by something else before the engine could bind it.
+    Exited(String),
+    /// It is still there and does not answer.
+    Silent(String),
+}
+
+impl NotReady {
+    fn into_reason(self) -> String {
+        match self {
+            Self::Exited(reason) | Self::Silent(reason) => reason,
+        }
+    }
+}
+
+/// Whether to start the engine again on another port. An engine that exits
+/// at once has most likely lost its port to something else, so a fresh port
+/// is worth trying, a few times. One that is running and silent would only
+/// be silent again.
+fn try_another_port(failure: &NotReady, attempt: usize) -> bool {
+    matches!(failure, NotReady::Exited(_)) && attempt < START_ATTEMPTS
+}
+
 /// Polls until the engine answers `SHOW VERSION`, the engine exits, or time
 /// runs out. Returns the version the engine reports.
-async fn wait_ready(port: u16, child: &ManagedChild) -> Result<String, String> {
+async fn wait_ready(port: u16, child: &ManagedChild) -> Result<String, NotReady> {
     let deadline = Instant::now() + READY_TIMEOUT;
     loop {
         if let Some(exit) = child.exit_info() {
             let code = exit
                 .code
                 .map_or_else(|| "no exit code".to_string(), |c| format!("exit code {c}"));
-            return Err(format!("The engine exited while starting ({code})."));
+            return Err(NotReady::Exited(format!(
+                "The engine exited while starting ({code})."
+            )));
         }
         let last_error = match PgSession::connect_with_timeout(port, READY_ATTEMPT).await {
             Ok(mut session) => match session.fetch("SHOW VERSION").await {
@@ -410,10 +454,10 @@ async fn wait_ready(port: u16, child: &ManagedChild) -> Result<String, String> {
             Err(err) => err.message,
         };
         if Instant::now() >= deadline {
-            return Err(format!(
+            return Err(NotReady::Silent(format!(
                 "The engine did not become ready within {} seconds. Last error: {last_error}",
                 READY_TIMEOUT.as_secs()
-            ));
+            )));
         }
         tokio::time::sleep(READY_POLL).await;
     }
@@ -625,5 +669,31 @@ impl Connection for LocalConnection {
 
     fn audit_dir(&self) -> Option<PathBuf> {
         Some(self.audit_dir.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_engine_that_exits_at_once_is_started_again_on_a_fresh_port() {
+        let exited = NotReady::Exited("The engine exited while starting (exit code 0).".into());
+        assert!(try_another_port(&exited, 1));
+        assert!(try_another_port(&exited, START_ATTEMPTS - 1));
+        // Only so many times. After that it is a failure, with its reason.
+        assert!(!try_another_port(&exited, START_ATTEMPTS));
+        assert_eq!(
+            exited.into_reason(),
+            "The engine exited while starting (exit code 0)."
+        );
+    }
+
+    #[test]
+    fn an_engine_that_is_running_and_silent_is_not_started_again() {
+        // Another port would not make it answer, and it would cost the
+        // operator another full wait.
+        let silent = NotReady::Silent("The engine did not become ready.".into());
+        assert!(!try_another_port(&silent, 1));
     }
 }
