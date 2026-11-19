@@ -34,7 +34,8 @@ const summary = (over: Partial<TurnSummary> = {}): TurnSummary => ({
   toolCalls: 1,
   stopped: false,
   stop: { kind: 'endTurn' },
-  usage: { inputTokens: 100, outputTokens: 10 },
+  // A provider that reports no counts, unless a test says otherwise.
+  usage: { inputTokens: null, outputTokens: null, cachedInputTokens: null },
   ...over,
 });
 
@@ -466,6 +467,32 @@ describe('a delegated agent', () => {
     // Where nothing needs approval the two read the same.
     expect(modeDescription('read_only', true)).toBe(modeDescription('read_only', false));
     expect(modeDescription('full_access', true)).toBe(modeDescription('full_access', false));
+  });
+});
+
+describe('what a turn used', () => {
+  it('is kept when the turn ends, as the provider counted it', () => {
+    const usage = { inputTokens: 19353, outputTokens: 92, cachedInputTokens: 9533 };
+    const state = turnFinished(play([]), summary({ usage }));
+    expect(state.items.at(-1)).toEqual({ kind: 'usage', key: 'item-1', usage });
+    expect(state.busy).toBe(false);
+  });
+
+  it('is kept when only one of the two counts was reported', () => {
+    const usage = { inputTokens: null, outputTokens: 40, cachedInputTokens: null };
+    const state = turnFinished(play([]), summary({ usage }));
+    expect(state.items.at(-1)).toMatchObject({ kind: 'usage', usage });
+  });
+
+  it('is not made up when the provider reported nothing', () => {
+    const state = turnFinished(play([]), summary());
+    expect(state.items.some((item) => item.kind === 'usage')).toBe(false);
+  });
+
+  it('comes before the notice that a turn was stopped', () => {
+    const usage = { inputTokens: 10, outputTokens: 2, cachedInputTokens: null };
+    const state = turnFinished(play([]), summary({ stopped: true, usage }));
+    expect(state.items.slice(-2).map((item) => item.kind)).toEqual(['usage', 'notice']);
   });
 });
 

@@ -9,6 +9,7 @@
 // something to put in front of the operator. The host writes every failed
 // call to the app's log.
 
+import type { TokenUsage } from '../host/types';
 import { splitFences, type ChatItem, type ChatState, type ToolItem } from './chat';
 
 export type Step =
@@ -31,11 +32,15 @@ export interface StepsBlock {
   waiting: boolean;
   /** The call that is running now, if one is. */
   running: ToolItem | null;
+  /** What the turn used, once it has ended and if the provider said. */
+  usage: TokenUsage | null;
 }
 
 export type Block =
   | { kind: 'item'; key: string; item: PlainItem }
   | StepsBlock
+  /** What a turn with no steps used. A turn with steps says it on their line. */
+  | { kind: 'usage'; key: string; usage: TokenUsage }
   /** A result set a turn is shown with, when its answer presents none itself. */
   | { kind: 'result'; key: string; item: ToolItem }
   | {
@@ -162,6 +167,7 @@ function layoutTurn(items: ChatItem[], active: boolean, tables: ToolItem[], bloc
     active,
     waiting: false,
     running: null,
+    usage: null,
   };
   // Where the steps were put, once there is a first step to show.
   let stepsAt = -1;
@@ -173,7 +179,10 @@ function layoutTurn(items: ChatItem[], active: boolean, tables: ToolItem[], bloc
     }
     addStep(steps, next);
   };
+  // Where the answer starts, its result sets included, once there is one.
+  let answerStart = -1;
   const answer = (item: { key: string; text: string }) => {
+    answerStart = blocks.length;
     // An answer that presents results itself is shown with those.
     // Otherwise the turn's result sets go in front of it.
     if (!presentsCharts(item.text)) {
@@ -185,6 +194,8 @@ function layoutTurn(items: ChatItem[], active: boolean, tables: ToolItem[], bloc
   // An answer that calls came after is drawn below them, like any other.
   let held: { key: string; text: string } | null = null;
   let answered = false;
+  // What the turn used, which the host says when the turn ends.
+  let used: Extract<ChatItem, { kind: 'usage' }> | null = null;
   for (const [index, item] of items.entries()) {
     if (item.kind === 'tool') {
       if (hasTable(item)) {
@@ -193,6 +204,8 @@ function layoutTurn(items: ChatItem[], active: boolean, tables: ToolItem[], bloc
       if (!isHiddenCall(item)) {
         step({ kind: 'call', key: item.key, item });
       }
+    } else if (item.kind === 'usage') {
+      used = item;
     } else if (item.kind !== 'assistant') {
       blocks.push({ kind: 'item', key: item.key, item });
     } else if (item.text.trim() === '') {
@@ -212,6 +225,18 @@ function layoutTurn(items: ChatItem[], active: boolean, tables: ToolItem[], bloc
   } else if (!answered) {
     // No answer yet, or none at all. The results go under the steps.
     blocks.splice(stepsAt >= 0 ? stepsAt + 1 : blocks.length, 0, ...results());
+  }
+
+  if (used) {
+    if (stepsAt >= 0) {
+      // On the line that heads the steps, out of the way of the answer.
+      steps.usage = used.usage;
+    } else {
+      // A turn with no steps still used tokens. Its count takes the place
+      // the steps would have had, above the answer.
+      const at = answerStart >= 0 ? answerStart : blocks.length;
+      blocks.splice(at, 0, { kind: 'usage', key: used.key, usage: used.usage });
+    }
   }
 }
 
@@ -235,6 +260,36 @@ export function stepsLabel(block: StepsBlock, title: (tool: string) => string): 
     return 'Notes';
   }
   return block.calls === 1 ? '1 step' : `${block.calls} steps`;
+}
+
+const counted = (tokens: number) => tokens.toLocaleString('en-US');
+
+/**
+ * What a turn used, in a few words: `19,353 tokens in (9,533 cached), 92 out`.
+ * A count the provider did not report is left out. Empty when it reported none.
+ */
+export function usageLabel(usage: TokenUsage): string {
+  const { inputTokens, outputTokens, cachedInputTokens } = usage;
+  const cached =
+    inputTokens !== null && cachedInputTokens !== null && cachedInputTokens > 0
+      ? ` (${counted(cachedInputTokens)} cached)`
+      : '';
+  if (inputTokens !== null && outputTokens !== null) {
+    return `${counted(inputTokens)} tokens in${cached}, ${counted(outputTokens)} out`;
+  }
+  if (inputTokens !== null) {
+    return `${counted(inputTokens)} tokens in${cached}`;
+  }
+  return outputTokens === null ? '' : `${counted(outputTokens)} tokens out`;
+}
+
+/** What those counts are, for whoever stops on them to ask. */
+export function usageDetail(usage: TokenUsage): string {
+  const cached =
+    usage.cachedInputTokens !== null && usage.cachedInputTokens > 0
+      ? ' Cached tokens are part of the tokens in: the provider had seen them before and read them from its cache.'
+      : '';
+  return `What the model was sent and what it wrote in this turn, as the provider counted it, added up over every call to the model. Each call sends the conversation so far again.${cached}`;
 }
 
 /** One line that says what a call was about: the start of its statement, or its arguments. */

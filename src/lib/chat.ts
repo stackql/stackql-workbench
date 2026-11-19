@@ -8,6 +8,7 @@ import type {
   ApprovalRequest,
   HostError,
   SafetyMode,
+  TokenUsage,
   TurnSummary,
 } from '../host/types';
 
@@ -52,6 +53,8 @@ export type ChatItem =
     }
   | ToolItem
   | { kind: 'notice'; key: string; text: string; tone: 'info' | 'warn' | 'error' }
+  /** What a turn used, as the provider counted it. Known when the turn ends. */
+  | { kind: 'usage'; key: string; usage: TokenUsage }
   | {
       kind: 'session';
       key: string;
@@ -254,6 +257,11 @@ function settle(state: ChatState): ChatState {
 /** The turn ended. */
 export function turnFinished(state: ChatState, summary: TurnSummary): ChatState {
   let next = settle(state);
+  // Kept only when the provider reported a count. Not every one does.
+  const { usage } = summary;
+  if (usage.inputTokens !== null || usage.outputTokens !== null) {
+    next = push(next, (key) => ({ kind: 'usage', key, usage }));
+  }
   if (summary.stopped) {
     next = push(next, (key) => ({
       kind: 'notice',

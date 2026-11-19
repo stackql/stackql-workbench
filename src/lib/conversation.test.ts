@@ -17,6 +17,8 @@ import {
   isHiddenCall,
   presentsCharts,
   stepsLabel,
+  usageDetail,
+  usageLabel,
   type Block,
   type StepsBlock,
 } from './conversation';
@@ -26,7 +28,8 @@ const ended: TurnSummary = {
   toolCalls: 1,
   stopped: false,
   stop: { kind: 'endTurn' },
-  usage: { inputTokens: 1, outputTokens: 1 },
+  // A provider that reports no counts, unless a test says otherwise.
+  usage: { inputTokens: null, outputTokens: null, cachedInputTokens: null },
 };
 
 const table = (columns: string[], rows: (string | null)[][]): AgentTable => ({
@@ -404,6 +407,98 @@ describe('the result sets a turn is shown with', () => {
         said('GitHub is installed.'),
       ]),
     ).toEqual([]);
+  });
+});
+
+describe('what a turn used', () => {
+  const usage = { inputTokens: 19353, outputTokens: 92, cachedInputTokens: 9533 };
+  const counted = { ...ended, usage };
+
+  it('is said on the line that heads the steps', () => {
+    const blocks = conversationBlocks(
+      turnFinished(
+        play([
+          started('c1', 'run_select_query', 'SELECT month, issues FROM t'),
+          finished('c1', MONTHS),
+          said('Two months.'),
+        ]),
+        counted,
+      ),
+    );
+    // No block of its own: the steps carry it.
+    expect(kinds(blocks)).toEqual(['item', 'steps', 'result', 'answer']);
+    expect(stepsOf(blocks).usage).toEqual(usage);
+  });
+
+  it('takes the place of the steps, above the answer, in a turn that has none', () => {
+    const blocks = conversationBlocks(turnFinished(play([said('Hello.')]), counted));
+    expect(kinds(blocks)).toEqual(['item', 'usage', 'answer']);
+    const block = blocks[1];
+    expect(block?.kind === 'usage' && block.usage).toEqual(usage);
+  });
+
+  it('is still said when every call failed and nothing was answered', () => {
+    const blocks = conversationBlocks(
+      turnFinished(
+        play([started('c1', 'run_select_query', 'SELEC 1'), finished('c1', null, true)]),
+        counted,
+      ),
+    );
+    expect(kinds(blocks)).toEqual(['item', 'usage']);
+  });
+
+  it('belongs to its own turn', () => {
+    const first = turnFinished(play([said('One.')]), counted);
+    const second = turnFinished(
+      [
+        started('c1', 'run_select_query', 'SELECT month, issues FROM t'),
+        finished('c1', MONTHS),
+        said('Two.'),
+      ].reduce(applyAgentEvent, userSent(first, 'again')),
+      { ...ended, usage: { inputTokens: 500, outputTokens: 7, cachedInputTokens: null } },
+    );
+    const blocks = conversationBlocks(second);
+    expect(kinds(blocks)).toEqual(['item', 'usage', 'answer', 'item', 'steps', 'result', 'answer']);
+    expect(stepsOf(blocks).usage?.inputTokens).toBe(500);
+  });
+
+  it('is not shown while the turn runs, since it is not known yet', () => {
+    const running = play([started('c1', 'run_select_query', 'SELECT 1')]);
+    expect(stepsOf(conversationBlocks(running)).usage).toBeNull();
+  });
+});
+
+describe('usageLabel and usageDetail', () => {
+  it('says the counts in full, with what was cached', () => {
+    expect(usageLabel({ inputTokens: 19353, outputTokens: 92, cachedInputTokens: 9533 })).toBe(
+      '19,353 tokens in (9,533 cached), 92 out',
+    );
+    expect(usageLabel({ inputTokens: 1204, outputTokens: 86, cachedInputTokens: null })).toBe(
+      '1,204 tokens in, 86 out',
+    );
+    // Nothing cached is nothing worth a bracket.
+    expect(usageLabel({ inputTokens: 1204, outputTokens: 86, cachedInputTokens: 0 })).toBe(
+      '1,204 tokens in, 86 out',
+    );
+  });
+
+  it('leaves out a count the provider did not report', () => {
+    expect(usageLabel({ inputTokens: 300, outputTokens: null, cachedInputTokens: 150 })).toBe(
+      '300 tokens in (150 cached)',
+    );
+    expect(usageLabel({ inputTokens: null, outputTokens: 40, cachedInputTokens: null })).toBe(
+      '40 tokens out',
+    );
+    expect(usageLabel({ inputTokens: null, outputTokens: null, cachedInputTokens: 9 })).toBe('');
+  });
+
+  it('explains that the counts cover every call to the model', () => {
+    const plain = usageDetail({ inputTokens: 10, outputTokens: 2, cachedInputTokens: null });
+    expect(plain).toContain('added up over every call to the model');
+    expect(plain).not.toContain('cache');
+    expect(usageDetail({ inputTokens: 10, outputTokens: 2, cachedInputTokens: 4 })).toContain(
+      'part of the tokens in',
+    );
   });
 });
 

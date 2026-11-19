@@ -313,7 +313,20 @@ export interface TurnSummary {
   /** The operator stopped the turn. */
   stopped: boolean;
   stop: StopReason;
-  usage: { inputTokens: number | null; outputTokens: number | null };
+  usage: TokenUsage;
+}
+
+/**
+ * What a turn used, added up over every call to the model in it. A count is
+ * null when the provider did not report it, which is not the same as zero.
+ */
+export interface TokenUsage {
+  /** Everything the model was sent, what was read from a cache included. */
+  inputTokens: number | null;
+  /** Everything the model wrote, with its thinking where the provider counts it. */
+  outputTokens: number | null;
+  /** The part of the input the provider read from its cache. */
+  cachedInputTokens: number | null;
 }
 
 /** One statement the operator ran. */

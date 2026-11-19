@@ -16,7 +16,7 @@ import { ArrowUp, Bot, ErrorMark, NewChat, Shield, Spinner, Stop, Warning } from
 import { AssistantText } from './AssistantText';
 import { ResultCard } from './ResultCard';
 import { SessionChips } from './SessionChips';
-import { Steps } from './Steps';
+import { Steps, UsageText } from './Steps';
 
 const BACKEND_LABEL: Record<string, string> = {
   gemini: 'Gemini',
@@ -346,6 +346,13 @@ function BlockView({ block, backend, onOpenInEditor, onShowTable, onAnswer }: Bl
             />
           )}
         />
+      );
+    case 'usage':
+      // A turn with no steps. Where the steps line would have been.
+      return (
+        <div className="flex h-6 items-center px-1">
+          <UsageText usage={block.usage} />
+        </div>
       );
     case 'result': {
       const { item } = block;

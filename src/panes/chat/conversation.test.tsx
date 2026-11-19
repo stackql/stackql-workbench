@@ -24,7 +24,8 @@ const ended: TurnSummary = {
   toolCalls: 1,
   stopped: false,
   stop: { kind: 'endTurn' },
-  usage: { inputTokens: 1, outputTokens: 1 },
+  // What the Copilot CLI reported for a turn of two calls to the model.
+  usage: { inputTokens: 19353, outputTokens: 92, cachedInputTokens: 9533 },
 };
 
 const MONTHS: AgentTable = {
@@ -193,6 +194,13 @@ describe('the steps of a turn', () => {
     expect(html).toContain('1 step');
     // Folded, so no call is drawn.
     expect(html).not.toContain('data-tool=');
+  });
+
+  it('say what the turn used on their line, also when folded away', () => {
+    expect(html).toContain('data-usage');
+    expect(html).toContain('19,353 tokens in (9,533 cached), 92 out');
+    // What the numbers are is there for whoever stops on them.
+    expect(html).toContain('added up over every call to the model');
   });
 
   it('hold nothing of a call that failed, in any block of the conversation', () => {

@@ -1,6 +1,14 @@
 import { useState, type ReactNode } from 'react';
+import type { TokenUsage } from '../../host/types';
 import { argumentSummary, toolTitle, type ApprovalState, type ToolItem } from '../../lib/chat';
-import { callSummary, stepsLabel, type Step, type StepsBlock } from '../../lib/conversation';
+import {
+  callSummary,
+  stepsLabel,
+  usageDetail,
+  usageLabel,
+  type Step,
+  type StepsBlock,
+} from '../../lib/conversation';
 import { equivalentSql } from '../../lib/equivalentSql';
 import { formatElapsed, formatRowCount } from '../../lib/results';
 import { nextSort, sortRows, type SortState } from '../../lib/sortRows';
@@ -28,29 +36,32 @@ export function Steps({ block, onOpenInEditor, onAnswer, renderNote }: StepsProp
 
   return (
     <div data-steps={block.active ? 'running' : 'done'}>
-      <button
-        type="button"
-        aria-expanded={open}
-        className="flex h-6 max-w-full items-center gap-1.5 rounded px-1 text-ink-muted hover:bg-surface-sunken hover:text-ink"
-        onClick={() => {
-          setChosen(!open);
-        }}
-      >
-        {block.active ? (
-          block.waiting ? (
-            <Warning className="shrink-0 text-warn" />
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          aria-expanded={open}
+          className="flex h-6 min-w-0 items-center gap-1.5 rounded px-1 text-ink-muted hover:bg-surface-sunken hover:text-ink"
+          onClick={() => {
+            setChosen(!open);
+          }}
+        >
+          {block.active ? (
+            block.waiting ? (
+              <Warning className="shrink-0 text-warn" />
+            ) : (
+              <Spinner className="shrink-0" />
+            )
+          ) : open ? (
+            <ChevronDown className="shrink-0" />
           ) : (
-            <Spinner className="shrink-0" />
-          )
-        ) : open ? (
-          <ChevronDown className="shrink-0" />
-        ) : (
-          <ChevronRight className="shrink-0" />
-        )}
-        <span className="truncate">{stepsLabel(block, toolTitle)}</span>
-        {block.active &&
-          (open ? <ChevronDown className="shrink-0" /> : <ChevronRight className="shrink-0" />)}
-      </button>
+            <ChevronRight className="shrink-0" />
+          )}
+          <span className="truncate">{stepsLabel(block, toolTitle)}</span>
+          {block.active &&
+            (open ? <ChevronDown className="shrink-0" /> : <ChevronRight className="shrink-0" />)}
+        </button>
+        {block.usage && <UsageText usage={block.usage} />}
+      </div>
 
       {open && (
         <div className="mt-1 ml-[9px] flex flex-col gap-0.5 border-l border-line pl-3">
@@ -71,6 +82,26 @@ export function Steps({ block, onOpenInEditor, onAnswer, renderNote }: StepsProp
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * What a turn used, in tokens, as the provider counted it. Small and to the
+ * side: it is there for whoever wants it and is not part of the answer.
+ */
+export function UsageText({ usage }: { usage: TokenUsage }) {
+  const label = usageLabel(usage);
+  if (label === '') {
+    return null;
+  }
+  return (
+    <span
+      className="selectable shrink-0 text-[12px] text-ink-muted tabular-nums"
+      title={usageDetail(usage)}
+      data-usage
+    >
+      {label}
+    </span>
   );
 }
 
