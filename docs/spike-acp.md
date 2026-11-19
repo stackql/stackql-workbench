@@ -119,6 +119,28 @@ What the host does with this:
 - Stops a turn in which a subagent starts a subagent of its own, at the first one, and says why. In every run where that happened the subagent had been unable to do its job.
 - Stops a turn that starts more than 12 subagents, and says why.
 
+## Token counts
+
+This was tested on 19 November 2026 against GitHub Copilot CLI 1.0.114, to see whether the agent says what a turn used. One prompt was sent to the probe, on the cheapest model, and one through the app. The prompt to the probe made the model call one engine tool, so the turn took two calls to the model.
+
+| Question | Finding |
+|---|---|
+| Does the answer to `session/prompt` carry a count | Yes. Beside `stopReason` it has `usage`, with `inputTokens`, `outputTokens`, `totalTokens`, `thoughtTokens`, `cachedReadTokens` and `cachedWriteTokens` |
+| What the count covers | The whole turn, not one call to the model. The run observed gave `inputTokens` 19353 for two calls, while the context window held a little over 9,000 tokens at each |
+| Whether the input count holds cached tokens | It did. 19353 was the 9533 read from the cache, the 9805 written to it, and 15 more |
+| Whether thinking is in the total | `totalTokens` was `inputTokens` plus `outputTokens`. `thoughtTokens` was 46 and was not added on top, so it is either part of the output count or left out of the total |
+| Anything while the turn runs | A `usage_update` after each call to the model, with `used` and `size`: how much of the model's context window the session takes up, 9,343 of 128,000 after the second call. It is not a count of what the turn used |
+
+What the host does with this:
+
+- Reads `inputTokens`, `outputTokens` and `cachedReadTokens` from the answer to the prompt, as the turn's use. The input count is taken as the whole input, cached or not, which is what the other backends report too.
+- Does not add `thoughtTokens` to anything, since the run did not show whether the output count already holds it.
+- Ignores `usage_update`. How full the context window is would be worth showing one day. It is a different number from what a turn used.
+
+Whether the tokens of a subagent are in the turn's count was not tested.
+
+On this backend the count is not what the operator pays. The plan is billed by the request, with a multiplier for the model, and the settings pane shows that multiplier. The count still says how large a turn was.
+
 ## Limits
 
 These are known and accepted for now.

@@ -229,6 +229,8 @@ With an API key backend, independent queries the model asks for in one step run 
 
 A turn is shown as its answer. What the assistant did on the way, the calls it made with their SQL and results, is a list of steps above the answer that folds away when the turn ends. The result set the answer rests on is shown as a table: click a column to sort by it, and use the download control to save it as CSV. Ask for a chart, a plot or a trend and the assistant draws one from the result: bars, a line, an area, a pie or a scatter chart, with the table of the same rows one click away.
 
+When a turn ends, the line that heads its steps says what it used in tokens, as the provider counted it: tokens in, how many of those were read from the provider's cache, and tokens out. The counts cover every call to the model in the turn. With GitHub Copilot they say how large a turn was, not what it cost, since that plan is billed by the request.
+
 A statement that fails on the way to an answer is not listed in the conversation. The assistant corrects it and carries on. Each one is written to the app's log with what came back, and Help > Show Log File opens it. The Activity view still lists every statement the assistant ran, with its outcome.
 
 Without a backend the explorer and the query editor work as before.

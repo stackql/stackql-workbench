@@ -93,9 +93,29 @@ A turn is shown as its answer. What the assistant did on the way is one list of 
 - A call that failed is not listed. A model reads the error, corrects the statement and runs it again. Those attempts are written to the app's log, with the statement and what came back.
 - A call the operator was asked to approve stays in the list whatever became of it, because the decision was theirs. If they approved it and it then failed, the step says why.
 - The last statement of the turn that returned rows is shown under the steps as a table that sorts and downloads. So are the statements the assistant asked for together with it, in the same step, up to four in all: a question that takes two statements is shown with both, and what was looked up on the way to them stays in the steps. An answer that holds chart blocks is shown with those instead, each with its own table.
+- What the turn used is said on the line that heads the steps, once the turn has ended: `6 steps  25,469 tokens in (12,631 cached), 158 out`. A turn with no steps says it on a line of its own in the same place. It is small and to the side, since it is not part of the answer. See "Token counts" below.
 - The host says which step of the model a call belongs to. Its own loop knows each step. A delegated agent does not say where a step ends, so there the calls that follow one of the agent's messages count as one step.
 
 Every statement the agent runs is still on record: the engine writes each one to its audit log, which the Activity view lists with its outcome.
+
+## Token counts
+
+The counts are the provider's own, passed on. Nothing is estimated: a count a provider does not report is not shown, and a provider that reports none leaves the line out.
+
+- Tokens in is everything the model was sent in the turn, whether or not the provider read part of it from its cache. The cached part is said in brackets where the provider tells it apart.
+- Tokens out is everything the model wrote, with its thinking where the provider counts it.
+- Both are added up over every call to the model in the turn. Each call sends the conversation so far again, with the engine's guidance, so a turn of ten calls counts that ten times. That is how it is billed where billing is by the token.
+
+Where each count comes from is below.
+
+| Backend | Tokens in | Cached | Tokens out |
+|---|---|---|---|
+| Gemini | `promptTokenCount` plus `toolUsePromptTokenCount` | `cachedContentTokenCount` | `candidatesTokenCount` plus `thoughtsTokenCount`, which the API counts apart and bills as output |
+| Anthropic | `input_tokens` plus the two cache counts, which the API reports apart from it | `cache_read_input_tokens` | `output_tokens` |
+| OpenAI-compatible | `prompt_tokens` | `prompt_tokens_details.cached_tokens`, which a local server usually does not send | `completion_tokens` |
+| GitHub Copilot CLI | `inputTokens` from the answer to the prompt | `cachedReadTokens` | `outputTokens`. The run observed did not show whether that holds the model's thinking |
+
+A turn that fails before it ends has no count, because the host learns the count from how the turn ends. On the Copilot CLI the count is not the cost: that plan is billed by the request. What the CLI reports was observed, and is in `docs/spike-acp.md`.
 
 ## The log
 
@@ -109,6 +129,6 @@ It is a different record from the engine's audit log in `<app data dir>/audit`, 
 | `engine_running`, `engine_failed` | The engine comes up, or does not |
 | `tool_call_failed` | A call the assistant made ended as an error, with the tool, the statement or arguments, and what came back |
 | `notice` | The host had something to tell the operator during a turn |
-| `turn_finished`, `turn_failed` | A turn ends |
+| `turn_finished`, `turn_failed` | A turn ends. A turn that finished is written with its token counts, where the provider reported them |
 
 A record never holds an API key, an environment value or what the operator typed to the assistant.
