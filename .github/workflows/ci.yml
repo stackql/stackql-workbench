@@ -142,6 +142,27 @@ jobs:
           codesign --display --verbose=2 "$app"
           ls -l "$bundle"/dmg
 
+      # The app must stand on its own too. Everything it links to has to be
+      # part of macOS: a system framework, or a library under /usr/lib. The
+      # page renderer is one of those frameworks, so there is nothing to ship
+      # with the app as there is on Windows.
+      - name: Check what the app asks the system for
+        shell: bash
+        run: |
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app=$(ls -d "$bundle"/macos/*.app)
+          needed=$(otool -L "$app/Contents/MacOS/stackql-workbench" \
+            | grep -E '^[[:space:]]' | awk '{print $1}' | sort -u)
+          echo "$needed"
+          foreign=$(echo "$needed" | grep -v -E '^(/System/Library/|/usr/lib/)' || true)
+          if [ -n "$foreign" ]; then
+            echo "Not part of macOS:"
+            echo "$foreign"
+            exit 1
+          fi
+          # Nothing else is carried in the bundle that would have to be signed.
+          find "$app/Contents" -type f \( -name '*.dylib' -o -name '*.so' \) -print
+
       - uses: actions/upload-artifact@v7
         with:
           name: stackql-workbench-macos-universal
@@ -203,17 +224,15 @@ jobs:
         run: npm run tauri build -- --no-bundle
 
       # The executable must stand on its own in the installer's folder. It
-      # may use the C runtime that is part of Windows, and nothing that would
-      # have to be installed with it.
-      - name: Check the executable
+      # carries its C runtime inside it, so what it asks the system for is
+      # Windows itself. This reads its import tables and fails on a runtime.
+      - name: Check what the executable asks the system for
+        run: node scripts/check-exe-imports.js src-tauri/target/release/stackql-workbench.exe
+
+      - name: Pack the executable for the installer
         shell: pwsh
         run: |
           $exe = 'src-tauri/target/release/stackql-workbench.exe'
-          if (-not (Test-Path $exe)) { throw "No executable at $exe" }
-          $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes((Resolve-Path $exe)))
-          foreach ($library in 'vcruntime140', 'msvcp140', 'WebView2Loader.dll') {
-            if ($text -match [regex]::Escape($library)) { throw "The executable needs $library beside it." }
-          }
           New-Item -ItemType Directory -Force installer-input | Out-Null
           Copy-Item $exe installer-input/
           $hash = (Get-FileHash installer-input/stackql-workbench.exe -Algorithm SHA256).Hash.ToLower()
