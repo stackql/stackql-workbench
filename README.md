@@ -198,6 +198,19 @@ cargo test
 
 The integration tests start a real `stackql` and are skipped when none is found. They need no cloud credentials and no network.
 
+### Test build for macOS
+
+CI builds the app for macOS on every run and keeps the disk image as the workflow artifact `stackql-workbench-macos-universal`. It runs on Apple Silicon and Intel. It is for testing and is not a release: the signature is ad hoc, with no Developer ID, and nothing is notarised.
+
+To try it:
+
+- Download the artifact from the run's page on GitHub, which needs a GitHub sign-in, and open the disk image inside it.
+- Drag the app to Applications. macOS refuses to open it the first time. Allow it under System Settings, Privacy & Security, with Open Anyway. The other way is `xattr -dr com.apple.quarantine "/Applications/StackQL Workbench.app"` in a terminal.
+- Install the `stackql` CLI. The app looks in `/usr/local/bin` and `/opt/homebrew/bin`. If it is somewhere else, set its path under Settings.
+- An app started from Finder does not see variables exported in a shell profile. For provider credentials, set a dotenv file under Settings.
+
+The same build on a Mac is `npm run tauri build -- --target universal-apple-darwin --bundles app,dmg`, after `rustup target add aarch64-apple-darwin x86_64-apple-darwin`.
+
 ### Using the app
 
 The engine keeps its provider cache in a folder of the app's own: `.stackql` beside the executable, or the app data directory when that place cannot be written to, as under `Program Files`. A first run therefore lists no providers. Run `REGISTRY PULL github;` in the editor to install one. To use another folder, for example the `.stackql` folder you already use with the `stackql` CLI, set it under Settings.

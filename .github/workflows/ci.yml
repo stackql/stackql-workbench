@@ -80,3 +80,56 @@ jobs:
       # Builds the webview bundle and the host together, without installers.
       - name: Debug build
         run: npm run tauri build -- --debug --no-bundle
+
+  # A test build for a Mac, kept as a workflow artifact. It is not a release:
+  # the signature is ad hoc, with no Developer ID, and nothing is notarised.
+  # It does not wait for the checks, so a failing test still leaves a build.
+  bundle-macos:
+    name: Bundle (macOS, universal)
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      # A universal build needs the standard library for both architectures.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install webview dependencies
+        run: npm ci
+
+      # An Apple Silicon Mac runs no code without a signature. "-" asks for an
+      # ad hoc one, which needs no certificate.
+      - name: Build the app and the disk image
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        run: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
+
+      - name: Check the bundle
+        shell: bash
+        run: |
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app=$(ls -d "$bundle"/macos/*.app)
+          archs=$(lipo -archs "$app/Contents/MacOS/stackql-workbench")
+          echo "Architectures: $archs"
+          [[ "$archs" == *arm64* && "$archs" == *x86_64* ]]
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app"
+          ls -l "$bundle"/dmg
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stackql-workbench-macos-universal
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

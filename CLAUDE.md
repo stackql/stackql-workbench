@@ -19,10 +19,13 @@ Pre-alpha. This much has landed on Windows.
 
 Not started: the rest of M1 (saved `.iql` files, cancel, a streaming grid), M2 (packaging), plan sign-in and any delegated agent other than the Copilot CLI. Replies from the API key backends are not streamed yet. Replies from the Copilot CLI are.
 
+CI has a job that builds a universal macOS disk image and keeps it as a workflow artifact, so the app can be tried on a Mac. The signature is ad hoc and nothing is notarised. It is a test build, not M2, and it decides nothing about the signing identities, which are still an open question.
+
 What has and has not been run:
 
 - Everything has been run on Windows 11 x64 against `stackql` v1.0.888.
-- Nothing has been run on macOS. The process supervision code for Unix is tested on Linux. The rest of the macOS-only code, the keychain store among it, has only been written.
+- Nothing has been run on macOS. The process supervision code for Unix is tested on Linux. The rest of the macOS-only code, the keychain store among it, compiles and has not been run: `cargo check` and clippy with warnings denied pass for `aarch64-apple-darwin`. They were run on Windows with a stand-in for the C compiler that one dependency's build script calls, so nothing was linked.
+- The CI workflow has not run. Nothing has been pushed, so the macOS bundle job is untested.
 - No API key backend has been run against a real inference provider. Each is tested against a local stub that checks what goes on the wire, and the loop is tested against a real `stackql mcp` with a scripted model.
 - The Copilot backend has been run for real, against GitHub Copilot CLI 1.0.113 with a signed-in account. Its protocol handling is also tested against a scripted agent.
 - The explorer, completion, history, export through the save dialog, the activity filters, the theme choice and the query library were each driven in the built app on Windows. The "Copy as CLI" commands were run in Windows PowerShell 5.1 and PowerShell 7 against the real engine. The POSIX form was checked in a shell under WSL with a stand-in program, not on macOS.
@@ -143,6 +146,7 @@ npm run tauri build -- --no-bundle          release build of the executable, no 
 npm run tauri build -- --debug --no-bundle  the debug build CI runs
 cd src-tauri && cargo run --example pgwire_spike   rerun the pg wire probe
 cd src-tauri && cargo run --example mcp_spike      rerun the MCP probe
+npm run tauri build -- --target universal-apple-darwin --bundles app,dmg   on a Mac, the test build CI keeps
 ```
 
 Things to know about them:
