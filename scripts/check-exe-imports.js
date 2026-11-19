@@ -1,7 +1,11 @@
 // Lists the libraries a Windows executable asks the system for, and fails
 // when one of them is a runtime the executable should carry inside it.
 //
-//   node scripts/check-exe-imports.js <path to the .exe>
+//   node scripts/check-exe-imports.js <path to the .exe> [x64 | arm64]
+//
+// With a processor named, it also fails when the executable is built for
+// another one. The MSI comes for x64 and for arm64, and a build on the wrong
+// toolchain would otherwise pass for the right one.
 //
 // The executable is shipped on its own, beside stackql.exe. It must not need
 // a C runtime, or any other library, that has to be installed or copied next
@@ -32,6 +36,28 @@ const RUNTIME_LIBRARIES = [
   /^concrt/i,
   /^webview2loader/i,
 ];
+
+/** The processors a PE file can name, by the names the builds go by. */
+const PROCESSORS = new Map([
+  [0x8664, 'x64'],
+  [0xaa64, 'arm64'],
+  [0x014c, 'x86'],
+]);
+
+/**
+ * The processor a PE file is built for.
+ *
+ * @param {Buffer} file The whole executable.
+ * @returns {string}
+ */
+export function builtFor(file) {
+  const pe = file.readUInt32LE(0x3c);
+  if (file.toString('latin1', pe, pe + 4) !== 'PE\0\0') {
+    throw new Error('Not a Windows executable.');
+  }
+  const machine = file.readUInt16LE(pe + 4);
+  return PROCESSORS.get(machine) ?? `machine 0x${machine.toString(16)}`;
+}
 
 /**
  * The names in the import tables of a PE file, in the order they appear.
@@ -144,8 +170,16 @@ export function runtimeLibraries(names) {
 const list = (items) => `${items.map((name) => `  ${name}`).join('\n')}\n`;
 
 const target = process.argv[2];
+const expected = process.argv[3];
 if (target) {
-  const names = importedLibraries(fs.readFileSync(target));
+  const file = fs.readFileSync(target);
+  const processor = builtFor(file);
+  process.stdout.write(`${target} is built for ${processor}.\n`);
+  if (expected && expected !== processor) {
+    process.stderr.write(`It should be built for ${expected}.\n`);
+    process.exit(1);
+  }
+  const names = importedLibraries(file);
   const sorted = [...new Set(names.map((name) => name.toLowerCase()))].sort();
   process.stdout.write(`${target} asks the system for ${sorted.length} libraries:\n`);
   process.stdout.write(list(sorted));

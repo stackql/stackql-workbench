@@ -214,16 +214,17 @@ The same build on a Mac is `npm run tauri build -- --target universal-apple-darw
 
 ### What the installers take
 
-CI also keeps what the StackQL MSI and PKG are built from, on every run, as two more workflow artifacts. Each holds one file and its SHA-256.
+CI also keeps what the StackQL MSI and PKG are built from, on every run, as three more workflow artifacts. Each holds one file and its SHA-256.
 
 | Artifact | Holds | For |
 |---|---|---|
-| `stackql-workbench-windows-x64` | `stackql-workbench.exe`, the optimised build | The MSI, which installs it beside `stackql.exe` |
+| `stackql-workbench-windows-x64` | `stackql-workbench.exe`, the optimised build for x64 | The x64 MSI, which installs it beside `stackql.exe` |
+| `stackql-workbench-windows-arm64` | `stackql-workbench.exe`, the optimised build for Arm | The arm64 MSI, which does the same |
 | `stackql-workbench-macos-universal-app` | `stackql-workbench-macos-universal.app.tar.gz`, the app bundle for Apple Silicon and Intel | The PKG, which installs it to `/Applications` |
 
 Neither is signed for release. The Windows executable has no signature and the Mac app has an ad hoc one, so the StackQL release signs both, and notarises the Mac app, before it ships them. Unpack the Mac app with `tar -xzf`, which keeps the links and permissions inside the bundle.
 
-The StackQL MSI is built for x64 and for arm64. This repository builds the Windows executable for x64 only, so the arm64 MSI has no Workbench of its own architecture yet.
+The StackQL MSI is built for x64 and for arm64, so there is a Windows executable for each. The two files have the same name, and the artifact says which is which. Each is built on a runner of that processor, and CI checks which processor the executable names. The maintainer asked for the arm64 build on 20 November 2026, in place of shipping the x64 executable to run under emulation: Windows emulates x64 only from Windows 11, it could not be tried here, and the arm64 MSI ships an engine built for Arm.
 
 Both are built to stand on their own, and CI checks that they do.
 
@@ -243,12 +244,12 @@ What the MSI needs for that is documented by Microsoft.
 
 The installers do not ship the runtime itself. The maintainer decided that on 20 November 2026: the binaries stay small and run on most modern machines. For a machine that must rely on nothing from the system there is still a way, which is to put Microsoft's Fixed Version runtime beside the app:
 
-- Get the Fixed Version runtime for x64 from Microsoft's WebView2 download page. It comes as a `.cab` to unpack.
+- Get the Fixed Version runtime for the processor of the executable, x64 or arm64, from Microsoft's WebView2 download page. It comes as a `.cab` to unpack.
 - Install the unpacked folder beside `stackql-workbench.exe`, renamed to `WebView2Runtime`.
 
 When that folder is there the app uses it and does not look at what the system has. When it is not, the app uses the system's runtime. Nothing else is configured, so the same executable serves both. The folder is large: the runtime installed on the machine this was measured on is 878 MB in 918 files. It is also a browser engine at one fixed version, so a security update to it means a new installer, where the system's runtime is kept up to date by Windows. The app only ever loads its own pages from inside the executable, which limits what an out-of-date renderer is exposed to. macOS has nothing of the kind to ship, because its renderer is part of the system. That renderer is as old as the macOS it is on, so the app needs macOS 13 or later. The maintainer decided that on 20 November 2026. The bundle declares it as its minimum, and an older macOS refuses to open the app. The reason is the styling library the pages use, which needs the WebKit of Safari 16.4, from March 2023. Safari 16.4 came to macOS 13 in an update, so a Mac that is still on the first releases of macOS 13 opens the app with a renderer older than that.
 
-To fetch them from the latest run on `main`: `gh run download --repo stackql/stackql-workbench --branch main --name stackql-workbench-windows-x64`, and the same with the other name. GitHub keeps a workflow artifact for 90 days. A build to be shipped should come from a tagged release, which this repository does not make yet.
+To fetch them from the latest run on `main`: `gh run download --repo stackql/stackql-workbench --branch main --name stackql-workbench-windows-x64`, and the same with the other names. GitHub keeps a workflow artifact for 90 days. A build to be shipped should come from a tagged release, which this repository does not make yet.
 
 ### Using the app
 

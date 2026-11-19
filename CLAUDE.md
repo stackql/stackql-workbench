@@ -22,7 +22,7 @@ Not started: the rest of M1 (saved `.iql` files, cancel, a streaming grid), M2 (
 
 CI has a job that builds a universal macOS disk image and keeps it as a workflow artifact, so the app can be tried on a Mac. The signature is ad hoc and nothing is notarised. It is a test build, not M2.
 
-CI also keeps what the StackQL MSI and PKG are built from: the optimised Windows executable as `stackql-workbench-windows-x64`, and the Mac app bundle, packed with tar, as `stackql-workbench-macos-universal-app`. Each comes with its SHA-256. Neither is signed for release. The maintainer said on 19 November 2026 that the StackQL release signs what it ships, so this repository holds no signing identity and signs nothing but the ad hoc signature a Mac needs to run the app at all. Workflow artifacts last 90 days and are not a release. There is no tagged release yet, which is how a shipped build should be pinned.
+CI also keeps what the StackQL MSI and PKG are built from: the optimised Windows executable for each processor the MSI comes for, as `stackql-workbench-windows-x64` and `stackql-workbench-windows-arm64`, and the Mac app bundle, packed with tar, as `stackql-workbench-macos-universal-app`. Each comes with its SHA-256. Neither is signed for release. The maintainer said on 19 November 2026 that the StackQL release signs what it ships, so this repository holds no signing identity and signs nothing but the ad hoc signature a Mac needs to run the app at all. Workflow artifacts last 90 days and are not a release. There is no tagged release yet, which is how a shipped build should be pinned.
 
 What has and has not been run:
 
@@ -176,7 +176,7 @@ Things to know about them:
 - Settings are in `<app config dir>/settings.json`. The agent audit log is in `<app data dir>/audit` and the operator's statement history in `<app data dir>/history.jsonl`. Those two do not move with the engine's data folder.
 - The app's own log is in `<app data dir>/logs`, one file for each run, named `stackql_workbench_<UTC time>.log`. The host writes it and nothing reads it back. It is apart from the engine's audit log, which the engine writes. The 20 newest files are kept.
 - The binaries are built to need nothing from the system that has to be installed. The maintainer asked for that on 19 November 2026.
-  - Windows: the C runtime is linked in whole, with `+crt-static` in `src-tauri/.cargo/config.toml`. Tauri's own default links the Visual C++ runtime in and leaves the Universal C runtime to Windows, and it would undo the flag for that part, so `build.windows.staticVCRuntime` is `false` in `tauri.conf.json`. Keep the two together. `node scripts/check-exe-imports.js <exe>` reads the import tables and fails on a runtime library. CI runs it on the optimised build.
+  - Windows: the C runtime is linked in whole, with `+crt-static` in `src-tauri/.cargo/config.toml`. Tauri's own default links the Visual C++ runtime in and leaves the Universal C runtime to Windows, and it would undo the flag for that part, so `build.windows.staticVCRuntime` is `false` in `tauri.conf.json`. Keep the two together. `node scripts/check-exe-imports.js <exe>` reads the import tables and fails on a runtime library. With `x64` or `arm64` after the path it also fails when the executable is built for another processor. CI runs it on each optimised build.
   - macOS: the app links only to system frameworks and libraries under `/usr/lib`. CI checks that with `otool`. CI also checks that the bundle declares the macOS version in `tauri.conf.json` as its minimum and that both architectures are built for it.
   - The WebView2 runtime is the one thing a Windows executable cannot carry. `webview_runtime.rs` uses a runtime in a `WebView2Runtime` folder beside the executable when there is one, by setting the loader's variable before anything else runs, and the system's runtime otherwise. Which was used is in the app's log. A runtime beside the app wins over a variable that was already set, the same rule the engine follows.
   - The installers do not ship that folder, so the system's runtime is the normal case. Microsoft says the runtime is included as part of Windows 11 and is on the vast majority of Windows 10 devices. Where there is none, an optimised build shows Tauri's own dialog with Microsoft's download address. Do not add a second check in the host.
@@ -449,7 +449,6 @@ This applies to docs, comments, commit messages and UI copy.
 Raise these with the maintainer when the work reaches them. Do not decide them alone.
 
 - How Workbench versions are pinned to engine releases, and the minimum engine version check at startup.
-- What the arm64 MSI ships. The StackQL MSI is built for x64 and for arm64, and this repository builds the Windows executable for x64 only.
 - How a build that ships is released from this repository: a tag and a release whose files the StackQL release fetches, in place of workflow artifacts that expire.
 - Whether `srv` should later co-host the MCP server so the IDE and the agent share one engine session.
 - Whether loopback pg wire needs TLS with a per-launch client certificate.
@@ -471,7 +470,8 @@ Signing is decided too. The maintainer signs the Windows executable and the macO
 
 So is the page renderer. The maintainer said on 20 November 2026 that the binaries are to stay small and run on most modern Windows and Mac machines, not carry a runtime of several hundred megabytes. The installers do not ship the WebView2 runtime, and the app uses the one Windows has. The `WebView2Runtime` folder beside the app still works for anyone who needs it.
 
-Two more were decided the same day.
+Three more were decided the same day.
 
+- Windows on Arm gets an executable built for Arm. The StackQL MSI is built for x64 and for arm64, and the maintainer said to build a native arm64 executable if emulation would not do. It would not: Windows emulates x64 only from Windows 11, there is no Arm machine here to try it on, and the arm64 MSI ships an engine built for Arm. CI builds and tests on GitHub's `windows-11-arm` runner, against the engine from `stackql_windows_arm64.zip`. Nothing is built across processors.
 - Where the WebView2 runtime is missing, the MSI gives the operator the option to install it, with Microsoft's Evergreen bootstrapper. Nothing is installed unless the operator takes the option. The MSI is built in the `stackql-windows-installer` repository, so that work is there and not here, and it is not done yet. `README.md` has the check, the bootstrapper and its address. Do not put an installer of the runtime in the host.
 - The oldest macOS the app supports is 13. `bundle.macOS.minimumSystemVersion` in `tauri.conf.json` is `13.0`, which goes into the bundle's `Info.plist` and sets the version the executable is built for. An older macOS refuses to open the app. The reason is the styling library, which needs the WebKit of Safari 16.4, from March 2023, and on a Mac the renderer is the WebKit of that macOS. Safari 16.4 came to macOS 13 in an update, so the first releases of macOS 13 have an older renderer and are still let in.

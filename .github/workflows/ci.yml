@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, windows-11-arm, macos-latest]
 
     steps:
       - uses: actions/checkout@v7
@@ -43,7 +43,26 @@ jobs:
       # skipped. They use metadata statements and the built-in provider only:
       # no credentials and no provider downloads.
       - uses: stackql/setup-stackql@v2
-        if: runner.os != 'macOS'
+        if: matrix.os == 'windows-latest'
+
+      # The MSI for Arm ships the engine built for Arm. The tests run against
+      # that one, from the release archive, and not against the x64 engine
+      # under emulation.
+      - name: Install stackql from the release archive (Windows on Arm)
+        if: matrix.os == 'windows-11-arm'
+        shell: pwsh
+        working-directory: ${{ runner.temp }}
+        run: |
+          $base = 'https://github.com/stackql/stackql/releases/latest/download'
+          curl.exe -fsSL -O "$base/stackql_windows_arm64.zip"
+          curl.exe -fsSL -O "$base/stackql_windows_arm64.zip.sha256"
+          $want = ((Get-Content stackql_windows_arm64.zip.sha256) -split '\s+')[0].ToLower()
+          $have = (Get-FileHash stackql_windows_arm64.zip -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $have) { throw 'The archive does not match its checksum.' }
+          Expand-Archive stackql_windows_arm64.zip -DestinationPath stackql-arm64
+          $folder = (Resolve-Path stackql-arm64).Path
+          Get-ChildItem $folder | Format-Table Name, Length
+          Add-Content -Path $env:GITHUB_PATH -Value $folder
 
       # On macOS the setup action installs with Homebrew, which has v0.12.824.
       # The tests rely on the current release, so the release package is
@@ -62,8 +81,9 @@ jobs:
         shell: bash
         run: |
           node --version
+          node -p "'node is built for ' + process.arch"
           npm --version
-          rustc --version
+          rustc -vV
           cargo --version
           stackql --version
 
@@ -215,10 +235,21 @@ jobs:
   # optimised build, with no installer of its own, and it is not signed here:
   # the StackQL release signs what it ships. Like the Mac build it does not
   # wait for the checks.
+  #
+  # The MSI comes for x64 and for arm64, so there is one build for each, made
+  # on a runner of that processor. Nothing is built across.
   build-windows:
-    name: Build (Windows, x64)
-    runs-on: windows-latest
+    name: Build (Windows, ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            os: windows-latest
+          - arch: arm64
+            os: windows-11-arm
 
     steps:
       - uses: actions/checkout@v7
@@ -245,8 +276,9 @@ jobs:
       # The executable must stand on its own in the installer's folder. It
       # carries its C runtime inside it, so what it asks the system for is
       # Windows itself. This reads its import tables and fails on a runtime.
+      # It also fails when the executable is not built for this processor.
       - name: Check what the executable asks the system for
-        run: node scripts/check-exe-imports.js src-tauri/target/release/stackql-workbench.exe
+        run: node scripts/check-exe-imports.js src-tauri/target/release/stackql-workbench.exe ${{ matrix.arch }}
 
       - name: Pack the executable for the installer
         shell: pwsh
@@ -261,6 +293,6 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: stackql-workbench-windows-x64
+          name: stackql-workbench-windows-${{ matrix.arch }}
           path: installer-input/*
           if-no-files-found: error
