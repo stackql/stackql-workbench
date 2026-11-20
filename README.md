@@ -233,16 +233,10 @@ Both are built to stand on their own, and CI checks that they do.
 
 One thing is not inside the Windows executable and cannot be: the page renderer, Microsoft's WebView2 runtime, which is a browser engine. The app uses the one Windows has. Microsoft says the runtime is included as part of Windows 11 and that the vast majority of Windows 10 devices already have it. It also says some devices may not, so there are two things to know.
 
-- Where no runtime is found, the app shows a dialog that says so, with the address of Microsoft's download page, and exits when the dialog is closed.
-- Where it is missing, the MSI gives the operator the option to install it. The maintainer decided that on 20 November 2026. It is an option: nothing is installed unless the operator takes it. The MSI is built in the `stackql-windows-installer` repository, so that work is there, and it is not done yet.
+- Where no runtime is found, the app says so itself. It checks before it starts anything and shows a dialog of the system's: "StackQL Workbench requires the Microsoft Edge WebView2 Runtime", with a link to Microsoft's page for installation instructions. It exits when the dialog is closed, and starts as usual once the runtime is there.
+- The installers are left out of it. The MSI adds the executable beside `stackql.exe` and nothing else: it neither ships the runtime nor installs it. The maintainer decided that on 20 November 2026.
 
-What the MSI needs for that is documented by Microsoft.
-
-- The check: the runtime is installed when a `pv` value that is not empty and not `0.0.0.0` is under `SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` in `HKEY_LOCAL_MACHINE`, or under `Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` in `HKEY_CURRENT_USER`.
-- The installer: the Evergreen bootstrapper, `MicrosoftEdgeWebview2Setup.exe`, run with `/silent /install`. Microsoft allows it to be packaged with an app. `https://go.microsoft.com/fwlink/p/?LinkId=2124703` served it, at 1.9 MB, on 20 November 2026.
-- The bootstrapper downloads the runtime, so the option needs the network at install time.
-
-The installers do not ship the runtime itself. The maintainer decided that on 20 November 2026: the binaries stay small and run on most modern machines. For a machine that must rely on nothing from the system there is still a way, which is to put Microsoft's Fixed Version runtime beside the app:
+Shipping the runtime was ruled out the same day: the binaries stay small and run on most modern machines. For a machine that must rely on nothing from the system there is still a way, which is to put Microsoft's Fixed Version runtime beside the app:
 
 - Get the Fixed Version runtime for the processor of the executable, x64 or arm64, from Microsoft's WebView2 download page. It comes as a `.cab` to unpack.
 - Install the unpacked folder beside `stackql-workbench.exe`, renamed to `WebView2Runtime`.
@@ -324,7 +318,7 @@ Milestones are delivered in order where they depend on each other. Each one leav
 
 StackQL Workbench has no installer of its own. It ships inside the StackQL installers, beside the `stackql` binary.
 
-- Windows: the StackQL MSI installs `stackql-workbench.exe` next to `stackql.exe` and adds a Start Menu entry. The executable needs no runtime installed. The page is drawn by the Microsoft WebView2 runtime that Windows has, which is part of Windows 11 and already on most Windows 10 machines. The MSI does not ship it, and is to offer to install it where it is missing. See "What the installers take".
+- Windows: the StackQL MSI installs `stackql-workbench.exe` next to `stackql.exe` and adds a Start Menu entry. The executable needs no runtime installed. The page is drawn by the Microsoft WebView2 runtime that Windows has, which is part of Windows 11 and already on most Windows 10 machines. The MSI neither ships it nor installs it. Where it is missing the app says so when it starts, with a link to Microsoft's page. See "What the installers take".
 - The app uses the `stackql` it was installed with: on Windows the one that sits beside it, and on macOS the command the PKG puts in `/usr/local/bin`, or an engine inside the app bundle if the PKG ever puts one there. That is the pair that was built and tested together, so nothing on the machine replaces it except a path the operator sets under Settings after the install. A `STACKQL_BIN` variable does not, and when one is set the status bar says it is not used. Neither installer has anything to configure for this.
 - Under `Program Files` the folder beside the app cannot be written to, so the engine keeps its provider cache in the app data directory. A first run lists no providers.
 - macOS: the StackQL PKG installs `StackQL Workbench.app` to `/Applications` alongside the `stackql` CLI.

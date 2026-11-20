@@ -154,6 +154,10 @@ pub fn run() {
     // First, before anything can start a thread: use the page renderer that
     // was shipped beside the app, when there is one.
     let bundled_webview = webview_runtime::use_bundled();
+    // Then, before anything is started: without a page renderer there is no
+    // window to say anything in, so say it in a dialog of the system's and
+    // stop. This returns at once where a renderer is found.
+    webview_runtime::require();
 
     let built = tauri::Builder::default()
         // The save dialog, used from the host only. The webview has no access to it.
