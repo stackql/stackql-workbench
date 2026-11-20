@@ -22,7 +22,9 @@ Not started: the rest of M1 (saved `.iql` files, cancel, a streaming grid), M2 (
 
 CI has a job that builds a universal macOS disk image and keeps it as a workflow artifact, so the app can be tried on a Mac. The signature is ad hoc and nothing is notarised. It is a test build, not M2.
 
-CI also keeps what the StackQL MSI and PKG are built from: the optimised Windows executable for each processor the MSI comes for, as `stackql-workbench-windows-x64` and `stackql-workbench-windows-arm64`, and the Mac app bundle, packed with tar, as `stackql-workbench-macos-universal-app`. Each comes with its SHA-256. Neither is signed for release. The maintainer said on 19 November 2026 that the StackQL release signs what it ships, so this repository holds no signing identity and signs nothing but the ad hoc signature a Mac needs to run the app at all. Workflow artifacts last 90 days and are not a release. There is no tagged release yet, which is how a shipped build should be pinned.
+CI also keeps what the StackQL MSI and PKG are built from: the optimised Windows executable for each processor the MSI comes for, as `stackql-workbench-windows-x64` and `stackql-workbench-windows-arm64`, and the Mac app bundle, packed with tar, as `stackql-workbench-macos-universal-app`. Each comes with its SHA-256. Neither is signed for release. The maintainer said on 19 November 2026 that the StackQL release signs what it ships, so this repository holds no signing identity and signs nothing but the ad hoc signature a Mac needs to run the app at all. Workflow artifacts last 90 days and are not a release.
+
+A build that ships comes from a release of this repository. The maintainer decided that on 20 November 2026. Publishing a release from the tag `v<version>` runs the Release workflow, which builds the three files from the commit the tag names and attaches them: `stackql-workbench_windows_amd64.exe`, `stackql-workbench_windows_arm64.exe` and `stackql-workbench_darwin_multiarch.app.tar.gz`, each with a `.sha256` beside it. The build scripts of the two installers fetch the files of the newest release. `.github/workflows/build.yml` builds, checks and names the files, and both CI and the Release workflow call it, so what a release attaches has been put together on every run before it. `scripts/check-release-tag.js` stops a release whose tag is not the version the app carries. No release has been made yet, so the step that attaches the files has not run.
 
 What has and has not been run:
 
@@ -43,6 +45,7 @@ What has and has not been run:
 - The page renderer was checked on Windows 11 with a build of the app in a folder of its own. With nothing beside it, the renderer process ran from the system's WebView2. With a copy of that runtime in a `WebView2Runtime` folder beside it, the renderer process ran from that folder and the app came up with its engine. With a `WebView2Runtime` folder that held no runtime, the system's was used. The copy was of the runtime Windows had installed, version 157, not of Microsoft's Fixed Version package, which has the same layout and was not downloaded.
 - No machine without a WebView2 runtime was tried, and no freshly installed Windows 11. A machine without one was imitated on Windows 11 by pointing the loader's variable at an empty folder. The optimised build from CI showed the app's own dialog, the heading and the one sentence each on one line, and no terminal: the process had no console host, where a debug build has one. It exited with code 1 when the dialog was closed. A click on the link, sent to the dialog of a debug build, brought Microsoft's page up in the browser and left the dialog open. Nothing is written to the app's log, which starts after the window is made. Before the check was added, the optimised build showed Tauri's own dialog and then ended in a panic.
 - The data folder of an installed app was checked on Windows with the app and a copy of `stackql.exe` in a folder the account could read and run from but not write to, which is what `Program Files` is to an ordinary account. The app was started with that folder as its working folder. It started the engine beside it, the engine's data folder was `<app data dir>/engine`, and nothing was added to the folder of the app. The real `Program Files` was not used, since that needs an administrator, and the note in the settings pane was not looked at in that run.
+- That run was before an installed app used the home folder. After the change the same layout was run again: the engine beside the app was started on `.stackql` in the home folder, the app listed the providers the operator's own `stackql` command had pulled there, and nothing was added to the folder of the app. The app alone in a folder it could write to, which is what a build is, kept a `.stackql` folder beside itself and listed no providers. The fallback to the local app data directory has run only in tests, and the macOS rule only as unit tests.
 - The token counts were seen in the built app with a scripted model, and for real through the Copilot CLI: one prompt to a probe to see what the CLI sends, and one turn through the app, which showed the count on the steps line and in the log. The counts of Gemini, Anthropic and an OpenAI-compatible server are read as their documentation describes and tested against stubs, not against the real services.
 - The supervisor's tests see a child end by waiting on a handle to it on Windows, and with `kill -0` on Unix. They used to ask `tasklist`, which on a busy machine could use up the time a test allowed. They passed 30 runs in a row with every core busy. With twice as many busy loops as cores a different test, `an_unexpected_exit_is_reported_with_its_code`, missed its 10 second limit twice in 30 runs.
 
@@ -134,7 +137,7 @@ stackql-workbench/
     .cargo/             build flags: the C runtime linked in on Windows
     examples/           pgwire_spike and mcp_spike, the probes behind the spike reports
     tests/              integration tests against a real stackql
-  scripts/              test launcher, the check of what a Windows executable asks the system for
+  scripts/              test launcher, the check of what a Windows executable asks the system for, the check of a release tag against the app's version
   docs/                 design notes and spike reports
 ```
 
@@ -174,7 +177,7 @@ Things to know about them:
 - `npm test` goes through `scripts/test.js`. Vitest fails on Windows when the working directory is spelled with a lower-case drive letter, which an editor terminal can do. The launcher corrects that.
 - `cargo test` includes integration tests that start a real `stackql`. They are skipped, with a note on stderr, when no binary is found. They need no credentials and no network.
 - The release executable is `src-tauri/target/release/stackql-workbench.exe` on Windows.
-- The engine's `--approot` is `.stackql` beside the Workbench executable. For a build from this repository that is `src-tauri/target/release/.stackql`, or `target/debug/.stackql` under `npm run tauri dev`. Where that folder cannot be written to, the fallback is `<app data dir>/engine`, which on Windows is `%APPDATA%\io.stackql.workbench\engine`. The operator can name another folder in Settings.
+- The engine's `--approot` depends on how the app got there. An installed app uses `.stackql` in the home folder, the one the `stackql` command uses. A build from this repository uses `.stackql` beside its executable: `src-tauri/target/release/.stackql`, or `target/debug/.stackql` under `npm run tauri dev`. Where the folder cannot be written to, the fallback is `<app local data dir>/engine`, which on Windows is `%LOCALAPPDATA%\io.stackql.workbench\engine`. The operator can name another folder in Settings.
 - Settings are in `<app config dir>/settings.json`. The agent audit log is in `<app data dir>/audit` and the operator's statement history in `<app data dir>/history.jsonl`. Those two do not move with the engine's data folder.
 - The app's own log is in `<app data dir>/logs`, one file for each run, named `stackql_workbench_<UTC time>.log`. The host writes it and nothing reads it back. It is apart from the engine's audit log, which the engine writes. The 20 newest files are kept.
 - The binaries are built to need nothing from the system that has to be installed. The maintainer asked for that on 19 November 2026.
@@ -238,9 +241,13 @@ Flags the host passes:
 - `--pgsrv.port` with a free port chosen by the host. The default is 5466 and may be taken.
 - `--approot` with the engine's data folder, always. The engine's own default is `.stackql` in the working directory, so the provider cache would otherwise follow wherever the app was started from. The host resolves the folder in this order and stops at the first hit.
   1. Explicit folder in settings. This source is strict: a folder that is not a full path, or cannot be created or written to, is an error and the engine does not start.
-  2. `.stackql` beside the Workbench executable. Skipped inside a macOS app bundle, because adding a file to a signed bundle breaks its signature.
-  3. `<app data dir>/engine`. Used when the folder beside the executable cannot be written to, which is the normal case for an app installed under `Program Files`. The settings pane says so.
-- The Workbench does not share the operator's own `.stackql` folder unless they point it there.
+  2. For an installed app, `.stackql` in the home folder. For a build that was not installed, `.stackql` beside the Workbench executable.
+  3. `<app local data dir>/engine`. Used when the second cannot be written to. The settings pane says so.
+- An installed app shares the home folder's `.stackql` with the `stackql` command. The maintainer decided that on 20 November 2026. The installers put the command and the app down together, the command shell the MSI installs starts the command in the home folder, and a provider pulled in one should be there in the other.
+- An app counts as installed when the engine sits beside its executable, which is how the MSI lays them out, or when it runs from a macOS bundle. It is the reading discovery makes of "the engine installed with the app".
+- An installed app writes nothing to the folder it was installed in. The MSI installs for the whole machine under `Program Files`, where an ordinary account cannot write, and a macOS bundle is signed. Its state is kept for each user.
+- A build from this repository does not share the operator's `.stackql` folder unless they point it there. It keeps its own beside the executable, so development and tests stay apart from the operator's providers.
+- The fallback is in the local app data directory because it is a cache that can be pulled again. It used to be in the app data directory, which on Windows follows a user from machine to machine, and a cache of two providers measured 95 MB.
 - `--pgsrv.debug.enable`. Without it an upstream API failure is an empty, successful result with the reason only on stderr. With it the reason arrives as a pg notice on the connection that ran the statement.
 - `--env.file` when the operator has set a credentials file.
 
@@ -453,9 +460,6 @@ This applies to docs, comments, commit messages and UI copy.
 Raise these with the maintainer when the work reaches them. Do not decide them alone.
 
 - How Workbench versions are pinned to engine releases, and the minimum engine version check at startup.
-- How a build that ships is released from this repository: a tag and a release whose files the StackQL release fetches, in place of workflow artifacts that expire.
-- Where an installed app keeps the engine's provider cache. The MSI installs for the whole machine under `Program Files`, which an ordinary account cannot write to, so the cache goes to `<app data dir>/engine`. On Windows that is in the roaming profile, and a cache of two providers measured 95 MB. The local app data directory is the usual place for a cache.
-- Whether an installed app shares the provider cache of the `stackql` command shell the MSI installs, which is `.stackql` in the home folder. Today each has its own, so a provider installed in one is not seen in the other.
 - Whether `srv` should later co-host the MCP server so the IDE and the agent share one engine session.
 - Whether loopback pg wire needs TLS with a per-launch client certificate.
 

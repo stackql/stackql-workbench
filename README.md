@@ -214,17 +214,29 @@ The same build on a Mac is `npm run tauri build -- --target universal-apple-darw
 
 ### What the installers take
 
-CI also keeps what the StackQL MSI and PKG are built from, on every run, as three more workflow artifacts. Each holds one file and its SHA-256.
+The StackQL MSI and PKG are built from three files. A release of this repository carries them as assets, each with its SHA-256 beside it as `<name>.sha256`.
 
-| Artifact | Holds | For |
+| Release asset | Holds | For |
 |---|---|---|
-| `stackql-workbench-windows-x64` | `stackql-workbench.exe`, the optimised build for x64 | The x64 MSI, which installs it beside `stackql.exe` |
-| `stackql-workbench-windows-arm64` | `stackql-workbench.exe`, the optimised build for Arm | The arm64 MSI, which does the same |
-| `stackql-workbench-macos-universal-app` | `stackql-workbench-macos-universal.app.tar.gz`, the app bundle for Apple Silicon and Intel | The PKG, which installs it to `/Applications` |
+| `stackql-workbench_windows_amd64.exe` | The optimised build for x64 | The x64 MSI, which installs it beside `stackql.exe` as `stackql-workbench.exe` |
+| `stackql-workbench_windows_arm64.exe` | The optimised build for Arm | The arm64 MSI, which does the same |
+| `stackql-workbench_darwin_multiarch.app.tar.gz` | The app bundle for Apple Silicon and Intel | The PKG, which installs it to `/Applications` |
+
+The names follow the StackQL release: `amd64` and `arm64` for Windows, `multiarch` for the Mac. The files of the newest release are at `https://github.com/stackql/stackql-workbench/releases/latest/download/<name>`. The build scripts of the two installers fetch them from there and check each against its SHA-256.
+
+To make a release:
+
+- Set the version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`, and merge that.
+- Publish a release from the tag `v<version>`, for example `v0.1.0`.
+- The Release workflow builds the three files from the commit the tag names and attaches them. It stops at once when the tag is not the version the app carries.
+
+A file that is already on a release is not replaced. To replace one, delete it from the release and start the Release workflow by hand with the tag.
+
+CI builds the same three files on every run, with the workflow a release uses, and keeps them as workflow artifacts. `stackql-workbench-release-assets` holds the three under their release names. `stackql-workbench-windows-x64`, `stackql-workbench-windows-arm64` and `stackql-workbench-macos-universal-app` hold each as it was built. They are on the summary page of a run that has finished, they last 90 days, and they are for trying a build, not for shipping one.
 
 Neither is signed for release. The Windows executable has no signature and the Mac app has an ad hoc one, so the StackQL release signs both, and notarises the Mac app, before it ships them. Unpack the Mac app with `tar -xzf`, which keeps the links and permissions inside the bundle.
 
-The StackQL MSI is built for x64 and for arm64, so there is a Windows executable for each. The two files have the same name, and the artifact says which is which. Each is built on a runner of that processor, and CI checks which processor the executable names. The maintainer asked for the arm64 build on 20 November 2026, in place of shipping the x64 executable to run under emulation: Windows emulates x64 only from Windows 11, it could not be tried here, and the arm64 MSI ships an engine built for Arm.
+The StackQL MSI is built for x64 and for arm64, so there is a Windows executable for each. Each is built on a runner of that processor, and CI checks which processor the executable names. The maintainer asked for the arm64 build on 20 November 2026, in place of shipping the x64 executable to run under emulation: Windows emulates x64 only from Windows 11, it could not be tried here, and the arm64 MSI ships an engine built for Arm.
 
 Both are built to stand on their own, and CI checks that they do.
 
@@ -242,12 +254,9 @@ Shipping the runtime was ruled out the same day: the binaries stay small and run
 - Install the unpacked folder beside `stackql-workbench.exe`, renamed to `WebView2Runtime`.
 
 When that folder is there the app uses it and does not look at what the system has. When it is not, the app uses the system's runtime. Nothing else is configured, so the same executable serves both. The folder is large: the runtime installed on the machine this was measured on is 878 MB in 918 files. It is also a browser engine at one fixed version, so a security update to it means a new installer, where the system's runtime is kept up to date by Windows. The app only ever loads its own pages from inside the executable, which limits what an out-of-date renderer is exposed to. macOS has nothing of the kind to ship, because its renderer is part of the system. That renderer is as old as the macOS it is on, so the app needs macOS 13 or later. The maintainer decided that on 20 November 2026. The bundle declares it as its minimum, and an older macOS refuses to open the app. The reason is the styling library the pages use, which needs the WebKit of Safari 16.4, from March 2023. Safari 16.4 came to macOS 13 in an update, so a Mac that is still on the first releases of macOS 13 opens the app with a renderer older than that.
-
-To fetch them from the latest run on `main`: `gh run download --repo stackql/stackql-workbench --branch main --name stackql-workbench-windows-x64`, and the same with the other names. GitHub keeps a workflow artifact for 90 days. A build to be shipped should come from a tagged release, which this repository does not make yet.
-
 ### Using the app
 
-The engine keeps its provider cache in a folder of the app's own: `.stackql` beside the executable, or the app data directory when that place cannot be written to, as under `Program Files`. A first run therefore lists no providers. Run `REGISTRY PULL github;` in the editor to install one. To use another folder, for example the `.stackql` folder you already use with the `stackql` CLI, set it under Settings.
+An installed app keeps the engine's provider cache in `.stackql` in your home folder. That is where the `stackql` command keeps it when it is started there, as the command shell the MSI installs does, so providers you pulled with the command are there in the app, and the other way round. A build from this repository keeps a `.stackql` folder beside its executable instead, so a first run of one lists no providers. Run `REGISTRY PULL github;` in the editor to install one. To use another folder, set it under Settings.
 
 Provider credentials are environment variables the engine reads. On Windows the engine sees the variables of your user account. To use a dotenv file, set it under Settings.
 
@@ -320,7 +329,7 @@ StackQL Workbench has no installer of its own. It ships inside the StackQL insta
 
 - Windows: the StackQL MSI installs `stackql-workbench.exe` next to `stackql.exe` and adds a Start Menu entry. The executable needs no runtime installed. The page is drawn by the Microsoft WebView2 runtime that Windows has, which is part of Windows 11 and already on most Windows 10 machines. The MSI neither ships it nor installs it. Where it is missing the app says so when it starts, with a link to Microsoft's page. See "What the installers take".
 - The app uses the `stackql` it was installed with: on Windows the one that sits beside it, and on macOS the command the PKG puts in `/usr/local/bin`, or an engine inside the app bundle if the PKG ever puts one there. That is the pair that was built and tested together, so nothing on the machine replaces it except a path the operator sets under Settings after the install. A `STACKQL_BIN` variable does not, and when one is set the status bar says it is not used. Neither installer has anything to configure for this.
-- Under `Program Files` the folder beside the app cannot be written to, so the engine keeps its provider cache in the app data directory. A first run lists no providers.
+- The app writes nothing to the folder it is installed in, which under `Program Files` an ordinary account cannot write to. Its state is kept for each user: settings, history and logs under the user's app data, and the engine's provider cache in `.stackql` in the home folder, shared with the `stackql` command. The installers have nothing to create for it.
 - macOS: the StackQL PKG installs `StackQL Workbench.app` to `/Applications` alongside the `stackql` CLI.
 - Bundle identifier: `io.stackql.workbench`.
 - This repository builds the per-platform artefacts. The StackQL release workflow consumes a pinned Workbench version.
