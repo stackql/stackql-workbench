@@ -166,9 +166,10 @@ export function SettingsDialog({ status, onClose, section, children }: SettingsD
             Engine data folder
           </label>
           <p className="mb-1 text-ink-muted">
-            Optional. Where the engine keeps the providers it has pulled. Leave empty to use a
-            .stackql folder beside this app, or the app data folder when that place cannot be
-            written to. Providers pulled into one folder are not seen from another.
+            Optional. Where the engine keeps the providers it has pulled. Leave empty to use the
+            .stackql folder in your home folder, which the stackql command uses too. A build that
+            was not installed uses a .stackql folder beside itself. Providers pulled into one folder
+            are not seen from another.
           </p>
           <input
             id={approotId}
