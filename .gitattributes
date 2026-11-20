@@ -1,0 +1,3 @@
+# Check out text files with LF on every platform. Prettier checks for LF, and
+# a Windows checkout would otherwise convert them to CRLF.
+* text=auto eol=lf

@@ -1,0 +1,398 @@
+import { useEffect, useMemo, useState } from 'react';
+import { host, toHostError } from '../../host';
+import { copyText } from '../../host/clipboard';
+import { exportFileName, toCsv, toJson, toMarkdownTable } from '../../lib/exportResult';
+import {
+  attentionCount,
+  formatElapsed,
+  formatRowCount,
+  gridStatement,
+  emptyWithNotice,
+  type RunState,
+  type StatementResult,
+} from '../../lib/results';
+import { nextSort, sortRows, type SortState } from '../../lib/sortRows';
+import { ContextMenu } from '../../ui/ContextMenu';
+import { IconButton } from '../../ui/IconButton';
+import { Download, Panel, Spinner, Warning } from '../../ui/icons';
+import { Splitter } from '../../ui/Splitter';
+import { CellViewer } from './CellViewer';
+import { Grid, type CellRef } from './Grid';
+import { Messages } from './Messages';
+
+interface ResultsProps {
+  run: RunState;
+  onStopWaiting: () => void;
+}
+
+/** The results pane: a grid, a cell viewer and the messages of the run. */
+export function Results({ run, onStopWaiting }: ResultsProps) {
+  // Keyed by run, so the selection and the chosen tab reset when a new run starts.
+  return <ResultsBody key={run.runId ?? 'none'} run={run} onStopWaiting={onStopWaiting} />;
+}
+
+type Tab = 'results' | 'messages';
+
+function ResultsBody({ run, onStopWaiting }: ResultsProps) {
+  const [tab, setTab] = useState<Tab>('results');
+  const [picked, setPicked] = useState<number | null>(null);
+  const [selected, setSelected] = useState<CellRef | null>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerWidth, setViewerWidth] = useState(380);
+  const [exportAt, setExportAt] = useState<{ x: number; y: number } | null>(null);
+  // What the last export or copy did.
+  const [note, setNote] = useState<{ text: string; failed: boolean } | null>(null);
+
+  // The sort belongs to one result set. It is kept with the statement it
+  // was set on, so another result set starts in the order its rows arrived.
+  const [sorted, setSorted] = useState<{ statement: number; sort: SortState } | null>(null);
+
+  const withResults = run.statements.filter((s) => s.columns !== null && s.columns.length > 0);
+  const statement =
+    (picked !== null ? run.statements.find((s) => s.index === picked) : undefined) ??
+    gridStatement(run);
+  const columns = statement?.columns ?? null;
+  const hasGrid = columns !== null && columns.length > 0;
+  const attention = attentionCount(run);
+
+  const sort = statement && sorted?.statement === statement.index ? sorted.sort : null;
+  const statementRows = statement?.rows;
+  // What the grid draws, and so what a cell reference and an export mean.
+  const rows = useMemo(() => sortRows(statementRows ?? [], sort), [statementRows, sort]);
+
+  const selectedValue = selected ? (rows[selected.row]?.[selected.column] ?? null) : null;
+  const selectedColumn = selected && columns ? (columns[selected.column] ?? '') : '';
+
+  const save = (kind: 'csv' | 'json') => {
+    if (!statement || !columns) {
+      return;
+    }
+    const text = kind === 'csv' ? toCsv(columns, rows) : toJson(columns, rows);
+    host.saveTextFile(exportFileName(kind, new Date()), kind, text).then(
+      (path) => {
+        if (path !== null) {
+          setNote({ text: `Saved ${path}`, failed: false });
+        }
+      },
+      (error: unknown) => {
+        setNote({ text: toHostError(error).message, failed: true });
+      },
+    );
+  };
+
+  const copyMarkdown = () => {
+    if (!statement || !columns) {
+      return;
+    }
+    void copyText(toMarkdownTable(columns, rows)).then((ok) => {
+      setNote(
+        ok
+          ? { text: `Copied ${formatRowCount(rows.length)} as a Markdown table`, failed: false }
+          : { text: 'Could not copy to the clipboard.', failed: true },
+      );
+    });
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-surface">
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-line bg-surface-alt px-2">
+        <TabButton
+          active={tab === 'results'}
+          onClick={() => {
+            setTab('results');
+          }}
+        >
+          Results
+        </TabButton>
+        <TabButton
+          active={tab === 'messages'}
+          onClick={() => {
+            setTab('messages');
+          }}
+        >
+          Messages
+          {attention > 0 && (
+            <span className="ml-1 rounded-full bg-warn px-1.5 text-[10px] font-semibold text-surface">
+              {attention}
+            </span>
+          )}
+        </TabButton>
+
+        {withResults.length > 1 && tab === 'results' && (
+          <select
+            aria-label="Result set"
+            className="ml-2 h-6 max-w-64 rounded border border-line bg-surface px-1"
+            value={statement?.index ?? ''}
+            onChange={(event) => {
+              setPicked(Number(event.target.value));
+              setSelected(null);
+            }}
+          >
+            {withResults.map((s) => (
+              <option key={s.index} value={s.index}>
+                {`${s.index + 1}: ${s.sql.replace(/\s+/g, ' ').slice(0, 60)}`}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <span className="flex-1" />
+        {run.origin === 'agent' && (
+          <span
+            className="rounded-sm bg-brand px-1 text-[10px] font-semibold text-on-brand"
+            title="This result came from a statement the assistant ran"
+          >
+            Assistant
+          </span>
+        )}
+        {note !== null && (
+          <span
+            role="status"
+            title={note.text}
+            className={`selectable max-w-[45%] truncate ${note.failed ? 'text-danger' : 'text-ink-muted'}`}
+          >
+            {note.text}
+          </span>
+        )}
+        <RunStatus run={run} statement={statement} onStopWaiting={onStopWaiting} />
+        {hasGrid && tab === 'results' && !run.running && (
+          <button
+            type="button"
+            title="Export or copy the result"
+            aria-label="Export or copy the result"
+            aria-haspopup="menu"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-muted hover:bg-surface-sunken hover:text-ink"
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              setExportAt({ x: box.right - 200, y: box.bottom + 2 });
+            }}
+          >
+            <Download />
+          </button>
+        )}
+        {hasGrid && tab === 'results' && (
+          <IconButton
+            label={viewerOpen ? 'Hide cell viewer' : 'Show cell viewer'}
+            active={viewerOpen}
+            onClick={() => {
+              setViewerOpen((open) => !open);
+            }}
+          >
+            <Panel />
+          </IconButton>
+        )}
+      </div>
+
+      {exportAt !== null && (
+        <ContextMenu
+          x={exportAt.x}
+          y={exportAt.y}
+          label="Export or copy the result"
+          items={[
+            {
+              label: 'Export as CSV...',
+              onSelect: () => {
+                save('csv');
+              },
+            },
+            {
+              label: 'Export as JSON...',
+              onSelect: () => {
+                save('json');
+              },
+            },
+            { label: 'Copy as Markdown table', onSelect: copyMarkdown },
+          ]}
+          onClose={() => {
+            setExportAt(null);
+          }}
+        />
+      )}
+
+      <div className="min-h-0 flex-1">
+        {tab === 'messages' ? (
+          <Messages run={run} />
+        ) : run.statements.length === 0 && !run.hostError ? (
+          <EmptyState running={run.running} />
+        ) : hasGrid && statement ? (
+          <div className="flex h-full min-h-0 flex-col">
+            {emptyWithNotice(statement) && (
+              <UpstreamBanner
+                statement={statement}
+                onShow={() => {
+                  setTab('messages');
+                }}
+              />
+            )}
+            <div className="flex min-h-0 flex-1">
+              <div className="min-w-0 flex-1">
+                <Grid
+                  columns={columns}
+                  rows={rows}
+                  selected={selected}
+                  onSelect={setSelected}
+                  onOpen={(cell) => {
+                    setSelected(cell);
+                    setViewerOpen(true);
+                  }}
+                  sort={sort}
+                  onSort={(column) => {
+                    const next = nextSort(sort, column);
+                    setSorted(next ? { statement: statement.index, sort: next } : null);
+                    // A cell reference is a place in the order drawn, which just changed.
+                    setSelected(null);
+                  }}
+                />
+              </div>
+              {viewerOpen && (
+                <>
+                  <Splitter
+                    orientation="vertical"
+                    label="Resize cell viewer"
+                    onResize={(delta) => {
+                      setViewerWidth((width) => Math.min(900, Math.max(220, width - delta)));
+                    }}
+                  />
+                  <div className="shrink-0" style={{ width: viewerWidth }}>
+                    {selected ? (
+                      <CellViewer
+                        column={selectedColumn}
+                        rowNumber={selected.row + 1}
+                        value={selectedValue}
+                        onClose={() => {
+                          setViewerOpen(false);
+                        }}
+                      />
+                    ) : (
+                      <p className="h-full border-l border-line px-3 py-2 text-ink-muted">
+                        Select a cell to see its full value.
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          // No result set to draw, so what happened is the result.
+          <Messages run={run} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`flex h-6 items-center rounded px-2 ${
+        active ? 'bg-surface font-semibold text-ink shadow-sm' : 'text-ink-muted hover:text-ink'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function EmptyState({ running }: { running: boolean }) {
+  return (
+    <p className="px-3 py-2 text-ink-muted">
+      {running ? 'Starting' : 'Run a statement to see its result here.'}
+    </p>
+  );
+}
+
+function UpstreamBanner({ statement, onShow }: { statement: StatementResult; onShow: () => void }) {
+  const first = statement.notices[0];
+  const line = (first?.detail ?? first?.message ?? '').split('\n')[0]?.slice(0, 200) ?? '';
+  return (
+    <div className="flex shrink-0 items-start gap-2 border-b border-line bg-warn/10 px-3 py-1.5 text-warn">
+      <Warning className="mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div>
+          No rows came back, and the provider answered with a message. Nothing may have matched, or
+          the call may not have succeeded.
+        </div>
+        <div className="selectable truncate font-mono text-[12px]">{line}</div>
+      </div>
+      <button type="button" className="shrink-0 underline" onClick={onShow}>
+        Details
+      </button>
+    </div>
+  );
+}
+
+function RunStatus({
+  run,
+  statement,
+  onStopWaiting,
+}: {
+  run: RunState;
+  statement: StatementResult | null;
+  onStopWaiting: () => void;
+}) {
+  if (run.running) {
+    const active = run.statements.at(-1);
+    return (
+      <span className="flex items-center gap-2 text-ink-muted">
+        <Spinner />
+        <span>
+          {run.total > 1 && active ? `Statement ${active.index + 1} of ${run.total}, ` : ''}
+          <RunningTimer />
+        </span>
+        <button
+          type="button"
+          className="h-6 rounded border border-line bg-surface px-2 text-ink hover:bg-surface-sunken"
+          title="Stops waiting for the result. The engine cannot cancel a statement, so it may still complete there."
+          onClick={onStopWaiting}
+        >
+          Stop waiting
+        </button>
+      </span>
+    );
+  }
+  if (!statement) {
+    return null;
+  }
+  if (statement.status === 'failed') {
+    return <span className="text-danger">Failed</span>;
+  }
+  if (statement.status === 'abandoned') {
+    return <span className="text-warn">Stopped waiting</span>;
+  }
+  const parts: string[] = [];
+  if (statement.columns !== null) {
+    parts.push(formatRowCount(statement.rowCount ?? statement.rows.length));
+  }
+  if (statement.elapsedMs !== null) {
+    parts.push(formatElapsed(statement.elapsedMs));
+  }
+  return <span className="mr-1 text-ink-muted tabular-nums">{parts.join(', ')}</span>;
+}
+
+/** Counts up while a statement runs. The engine sends nothing until it is done. */
+function RunningTimer() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const started = performance.now();
+    const timer = window.setInterval(() => {
+      setElapsed(performance.now() - started);
+    }, 100);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+  return <span className="tabular-nums">{`${(elapsed / 1000).toFixed(1)} s`}</span>;
+}

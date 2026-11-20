@@ -1,0 +1,180 @@
+@import 'tailwindcss';
+
+/*
+ * Every colour in the app is a token defined here. Components name tokens
+ * and never a colour value. The light theme is the default. The dark one
+ * applies when the root carries data-theme="dark", which the app sets from
+ * the system setting or from the choice under View.
+ */
+@theme {
+  /* Classic Blue is the brand colour, and the only blue. The other blues
+     here are lighter and darker steps of it. */
+  --color-brand: #0f4c81;
+  --color-brand-light: #3d74a6;
+  --color-brand-dark: #0a3559;
+  --color-on-brand: #ffffff;
+
+  --color-surface: #ffffff;
+  --color-surface-alt: #f4f6f8;
+  --color-surface-sunken: #e9edf1;
+  --color-line: #d5dbe1;
+  --color-ink: #1b2430;
+  --color-ink-muted: #5c6875;
+  --color-accent: #0f4c81;
+  --color-danger: #b42318;
+  --color-warn: #b54708;
+  --color-ok: #067647;
+  /* What dims the page behind a dialog. */
+  --color-scrim: rgb(0 0 0 / 0.4);
+
+  --font-sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Cascadia Mono', 'SF Mono', Consolas, Menlo, monospace;
+}
+
+:root {
+  color-scheme: light;
+  accent-color: var(--color-brand);
+  --syntax-keyword: #0f4c81;
+  --syntax-string: #a31515;
+  --syntax-number: #116644;
+  --syntax-comment: #6a737d;
+  --syntax-type: #7a3e9d;
+  --syntax-func: #795e26;
+
+  /* The series of a chart, in a fixed order that is never cycled. The first
+     is a step of Classic Blue. The order is what keeps neighbours apart for
+     colour-blind readers, so a new colour is not added by eye: the set was
+     checked as a whole against this surface. Three of the light steps sit
+     under 3 to 1 on white, which is why every chart has a table beside it. */
+  --chart-1: #16599a;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #6250d6;
+  --chart-8: #e34948;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-brand-light: #3d74a6;
+  --color-surface: #161b22;
+  --color-surface-alt: #1c232c;
+  --color-surface-sunken: #11161c;
+  --color-line: #303a46;
+  --color-ink: #e3e8ee;
+  --color-ink-muted: #96a2b0;
+  /* Classic Blue is too dark to read on a dark surface, so text and
+     outlines in the brand colour use a lighter tint here. Filled areas
+     keep the brand colour itself. */
+  --color-accent: #7fb2e0;
+  --color-danger: #f97066;
+  --color-warn: #fdb022;
+  --color-ok: #47cd89;
+  --color-scrim: rgb(0 0 0 / 0.6);
+
+  --syntax-keyword: #7fb2e0;
+  --syntax-string: #e39a7c;
+  --syntax-number: #9ad0a8;
+  --syntax-comment: #8b97a5;
+  --syntax-type: #c9a3e6;
+  --syntax-func: #dcc98a;
+
+  /* The same eight hues, stepped for the dark surface. */
+  --chart-1: #3f82c4;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #0ca30c;
+  --chart-7: #9085e9;
+  --chart-8: #e66767;
+}
+
+/* In the base layer, so that utility classes win over these element rules. */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    overflow: hidden;
+    /* The app is a tool, not a document: no accidental text selection in chrome. */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Content the operator may want to copy stays selectable. */
+  .selectable {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-ink-muted) 45%, transparent);
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-ink-muted) 70%, transparent);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Icons drawn dark on a transparent background disappear on a dark surface. */
+:root[data-theme='dark'] .wb-invert-on-dark {
+  filter: invert(1);
+}
+
+@keyframes wb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wb-spin {
+  animation: wb-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-spin {
+    animation-duration: 3s;
+  }
+}

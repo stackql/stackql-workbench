@@ -1,0 +1,90 @@
+[package]
+name = "stackql-workbench"
+version = "0.1.0"
+description = "Desktop query IDE and chat interface for StackQL"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+repository = "https://github.com/stackql/stackql-workbench"
+publish = false
+
+[lib]
+# The lib name must differ from the bin name, see rust-lang/cargo#8519.
+name = "stackql_workbench_lib"
+
+[[bin]]
+name = "stackql-workbench"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = [
+  "process",
+  "io-util",
+  "net",
+  "time",
+  "sync",
+  "rt",
+  "rt-multi-thread",
+  "macros",
+] }
+tokio-postgres = "0.7"
+futures-util = "0.3"
+# Text only. The default feature adds image support, which is not used.
+arboard = { version = "3", default-features = false }
+# HTTPS client. native-tls uses the TLS stack and trust store of the OS, which
+# avoids the extra build tools the default rustls provider needs on Windows.
+reqwest = { version = "0.13", default-features = false, features = [
+  "native-tls",
+  "http2",
+  "system-proxy",
+  "json",
+  "charset",
+] }
+base64 = "0.23"
+# The official Rust MCP SDK, client side only, over a stdio pair the host owns.
+rmcp = { version = "3", default-features = false, features = ["client", "transport-async-rw"] }
+# OS keychain access. keyring-core is the API; the platform stores are below.
+keyring-core = "1"
+# The system save dialog for exports. Called from host commands only.
+tauri-plugin-dialog = "2"
+# Opens the app's own links in the default browser. Called from a host command only.
+tauri-plugin-opener = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  # The dialog shown when no WebView2 runtime is found. The second is needed
+  # for the first to define it.
+  "Win32_UI_Controls",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows-native-keyring-store = "1"
+
+[target.'cfg(windows)'.dev-dependencies]
+# The supervisor's tests open a handle to a child and wait on it to see it end.
+windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

@@ -1,0 +1,11 @@
+# The Windows executable is shipped on its own, beside stackql.exe, so it
+# carries the whole C runtime inside it: the start-up code, the Visual C++
+# runtime and the Universal C runtime. What it then asks of the system is
+# Windows itself and nothing that has to be installed.
+#
+# Tauri's own default links the first two in and leaves the Universal C
+# runtime to Windows. That default is switched off in tauri.conf.json, under
+# build > windows > staticVCRuntime, because it would undo this flag for the
+# Universal C runtime. Keep the two settings together.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
