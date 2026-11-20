@@ -1,0 +1,88 @@
+name: Release
+
+# Attaches the files the StackQL installers take to a release: the Windows
+# executable for x64 and for arm64, and the Mac app, each with its SHA-256.
+#
+# It runs when a release is published from a tag. The files are built from
+# the commit the tag names, by the workflow CI runs on every commit. It can
+# also be started by hand for a release that already exists, to attach the
+# files again after a run that did not finish.
+#
+# Nothing here is signed for release. The StackQL release signs what it
+# ships.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag of a release that exists, to build and attach the files to
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  # The tag for version 1.2.3 is v1.2.3. A release under any other tag would
+  # hold an app that calls itself by another version.
+  version:
+    name: Check the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+
+    steps:
+      - id: tag
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: The tag is the version the app carries
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: node scripts/check-release-tag.js "$TAG"
+
+  build:
+    name: Build
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.version.outputs.tag }}
+
+  # A file that is already on the release is not replaced: the upload fails
+  # and says so. To replace one, delete it from the release and start this
+  # workflow by hand with the tag.
+  attach:
+    name: Attach the files to the release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: stackql-workbench-release-assets
+          path: release-assets
+
+      - name: Attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          ls -l release-assets
+          gh release upload "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | "\(.name)  \(.size) bytes  \(.digest)"'

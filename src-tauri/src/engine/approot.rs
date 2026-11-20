@@ -7,13 +7,29 @@
 //! Resolution order, first hit wins:
 //!
 //! 1. Explicit folder in settings
-//! 2. `.stackql` beside the Workbench executable
-//! 3. A folder under the app data directory
+//! 2. For an installed app, `.stackql` in the home folder. For a build that
+//!    was not installed, `.stackql` beside the Workbench executable
+//! 3. A folder under the local app data directory
 //!
 //! The explicit source is strict. If the operator named a folder and it
 //! cannot be used, that is an error and the search stops there. The second
-//! falls through to the third with a note, because an installed app usually
-//! sits where an ordinary account cannot write.
+//! falls through to the third with a note.
+//!
+//! An installed app sits where an ordinary account cannot write: the MSI
+//! installs for the whole machine under `Program Files`, and on macOS the
+//! app is a signed bundle. So its state is kept for each user, and nothing
+//! is written to the folder it was installed in. The folder chosen is the
+//! one the `stackql` command uses when it is started from the home folder,
+//! which is what the command shell the MSI installs does. The installers
+//! put the command and the app down together, so a provider pulled in one
+//! is there in the other.
+//!
+//! A build from this repository keeps its own folder beside the executable,
+//! apart from the operator's.
+//!
+//! The last one is a cache that can be pulled again, so it is kept in the
+//! local app data directory and not in the one that follows a user from
+//! machine to machine.
 
 use std::path::{Path, PathBuf};
 
@@ -25,6 +41,7 @@ pub const FOLDER_NAME: &str = ".stackql";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Settings,
+    Home,
     BesideApp,
     AppData,
 }
@@ -34,6 +51,7 @@ impl Source {
     pub fn label(self) -> &'static str {
         match self {
             Self::Settings => "settings",
+            Self::Home => "home folder, shared with the stackql command",
             Self::BesideApp => "beside the app",
             Self::AppData => "app data folder",
         }
@@ -43,30 +61,58 @@ impl Source {
 /// The folders tried when settings name none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Defaults {
-    /// `.stackql` beside the executable. `None` when there is no such place
-    /// or it must not be written to.
-    pub beside_app: Option<PathBuf>,
-    /// A folder under the app data directory, which an ordinary account can
-    /// always write to.
+    /// The folder tried first, and what it is. `None` when there is no such
+    /// place.
+    pub first: Option<(PathBuf, Source)>,
+    /// A folder under the local app data directory, which an ordinary
+    /// account can always write to.
     pub fallback: PathBuf,
 }
 
 impl Defaults {
     /// The defaults for an app whose executable is `exe`.
-    pub fn for_executable(exe: Option<&Path>, fallback: PathBuf) -> Self {
-        Self {
-            beside_app: exe.and_then(beside_executable),
-            fallback,
-        }
+    ///
+    /// `home` is the home folder of the account, when there is one.
+    /// `is_file` is injected so tests can describe a file system.
+    pub fn for_executable(
+        exe: Option<&Path>,
+        home: Option<&Path>,
+        fallback: PathBuf,
+        is_file: impl Fn(&Path) -> bool,
+    ) -> Self {
+        let first = exe.and_then(|exe| {
+            if installed(exe, &is_file) {
+                home.map(|home| (home.join(FOLDER_NAME), Source::Home))
+            } else {
+                beside_executable(exe).map(|dir| (dir, Source::BesideApp))
+            }
+        });
+        Self { first, fallback }
     }
 
     /// One fixed folder and nothing else. Tests use this.
     pub fn fixed(dir: PathBuf) -> Self {
         Self {
-            beside_app: None,
+            first: None,
             fallback: dir,
         }
     }
+}
+
+/// Whether the app at `exe` was put down by an installer.
+///
+/// The installers ship the engine with the app, and that is how an installed
+/// app is told from a build. On Windows the MSI puts `stackql.exe` in the
+/// folder of the Workbench executable. On macOS an installed app is a
+/// bundle. This is the same reading discovery makes of "the engine installed
+/// with the app".
+pub fn installed(exe: &Path, is_file: impl Fn(&Path) -> bool) -> bool {
+    if super::in_app_bundle(exe) {
+        return true;
+    }
+    exe.parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .is_some_and(|dir| is_file(&dir.join(super::discovery::BINARY_NAME)))
 }
 
 /// The data folder beside an executable, if there may be one.
@@ -146,18 +192,22 @@ pub fn resolve(
     }
 
     let mut note = None;
-    if let Some(path) = &defaults.beside_app {
+    if let Some((path, source)) = &defaults.first {
         match prepare(path) {
             Ok(()) => {
                 return Ok(Resolved {
                     path: path.clone(),
-                    source: Source::BesideApp,
+                    source: *source,
                     note: None,
                 });
             }
             Err(err) => {
+                let what = match source {
+                    Source::Home => "The folder in the home folder",
+                    _ => "The folder beside the app",
+                };
                 note = Some(format!(
-                    "The folder beside the app, {}, cannot be written to ({err}), so the app data folder is used.",
+                    "{what}, {}, cannot be written to ({err}), so the app data folder is used.",
                     path.display()
                 ));
             }
@@ -192,11 +242,25 @@ mod tests {
         }
     }
 
+    /// The defaults of a build that was not installed.
     fn defaults() -> Defaults {
         Defaults {
-            beside_app: Some(abs("/apps/workbench/.stackql")),
+            first: Some((abs("/apps/workbench/.stackql"), Source::BesideApp)),
             fallback: abs("/data/engine"),
         }
+    }
+
+    /// The defaults of an installed app.
+    fn installed_defaults() -> Defaults {
+        Defaults {
+            first: Some((abs("/home/me/.stackql"), Source::Home)),
+            fallback: abs("/data/engine"),
+        }
+    }
+
+    /// No file exists.
+    fn nothing(_: &Path) -> bool {
+        false
     }
 
     fn denied() -> io::Error {
@@ -307,29 +371,102 @@ mod tests {
     }
 
     #[test]
-    fn the_default_sits_beside_the_executable() {
+    fn a_build_keeps_its_folder_beside_the_executable() {
+        // No engine beside it: this is a build from the repository, and its
+        // folder stays apart from the operator's own.
         let exe = abs("/apps/workbench/stackql-workbench.exe");
         assert_eq!(
             beside_executable(&exe),
             Some(abs("/apps/workbench/.stackql"))
         );
-        let made = Defaults::for_executable(Some(&exe), abs("/data/engine"));
+        assert!(!installed(&exe, nothing));
+        let home = abs("/home/me");
+        let made = Defaults::for_executable(Some(&exe), Some(&home), abs("/data/engine"), nothing);
         assert_eq!(made, defaults());
     }
 
     #[test]
-    fn nothing_is_written_inside_a_macos_app_bundle() {
+    fn an_app_installed_beside_the_engine_uses_the_home_folder() {
+        // The MSI puts the two executables in one folder, under Program
+        // Files, where an ordinary account cannot write.
+        let exe = abs("/Program Files/StackQL/stackql-workbench.exe");
+        let engine = abs("/Program Files/StackQL").join(crate::engine::discovery::BINARY_NAME);
+        let beside = |path: &Path| path == engine;
+        assert!(installed(&exe, beside));
+        let home = abs("/home/me");
+        let made = Defaults::for_executable(Some(&exe), Some(&home), abs("/data/engine"), beside);
+        assert_eq!(made, installed_defaults());
+    }
+
+    #[test]
+    fn an_engine_somewhere_else_does_not_make_a_build_installed() {
+        let exe = abs("/apps/workbench/stackql-workbench.exe");
+        let elsewhere = abs("/Program Files/StackQL").join(crate::engine::discovery::BINARY_NAME);
+        assert!(!installed(&exe, |path| path == elsewhere));
+    }
+
+    #[test]
+    fn an_app_in_a_macos_bundle_uses_the_home_folder() {
+        // Nothing is written inside the bundle. Adding a file to a signed
+        // bundle breaks its signature.
         let exe = Path::new("/Applications/StackQL Workbench.app/Contents/MacOS/stackql-workbench");
         assert_eq!(beside_executable(exe), None);
-        let made = Defaults::for_executable(Some(exe), abs("/data/engine"));
+        assert!(installed(exe, nothing));
+        let home = abs("/home/me");
+        let made = Defaults::for_executable(Some(exe), Some(&home), abs("/data/engine"), nothing);
+        assert_eq!(made, installed_defaults());
+    }
+
+    #[test]
+    fn an_installed_app_with_no_home_folder_gives_only_the_fallback() {
+        let exe = Path::new("/Applications/StackQL Workbench.app/Contents/MacOS/stackql-workbench");
+        let made = Defaults::for_executable(Some(exe), None, abs("/data/engine"), nothing);
         assert_eq!(made, Defaults::fixed(abs("/data/engine")));
     }
 
     #[test]
     fn an_unknown_executable_gives_only_the_fallback() {
         assert_eq!(beside_executable(Path::new("stackql-workbench")), None);
-        let made = Defaults::for_executable(None, abs("/data/engine"));
+        let home = abs("/home/me");
+        let made = Defaults::for_executable(None, Some(&home), abs("/data/engine"), nothing);
         assert_eq!(made, Defaults::fixed(abs("/data/engine")));
+    }
+
+    #[test]
+    fn the_home_folder_is_the_default_of_an_installed_app() {
+        let ok = [abs("/home/me/.stackql"), abs("/data/engine")];
+        let tried = RefCell::new(Vec::new());
+        let found = resolve(None, &installed_defaults(), writable(&ok, &tried)).unwrap();
+        assert_eq!(found.path, abs("/home/me/.stackql"));
+        assert_eq!(found.source, Source::Home);
+        assert_eq!(found.note, None);
+        assert_eq!(tried.borrow().len(), 1, "the fallback is not created");
+    }
+
+    #[test]
+    fn a_home_folder_that_cannot_be_used_falls_back_with_a_note() {
+        let ok = [abs("/data/engine")];
+        let tried = RefCell::new(Vec::new());
+        let found = resolve(None, &installed_defaults(), writable(&ok, &tried)).unwrap();
+        assert_eq!(found.path, abs("/data/engine"));
+        assert_eq!(found.source, Source::AppData);
+        let note = found.note.unwrap();
+        assert!(note.contains("home folder"), "says which folder: {note}");
+        assert!(note.contains(".stackql"), "names the folder: {note}");
+        assert!(
+            note.contains("access is denied"),
+            "gives the reason: {note}"
+        );
+    }
+
+    #[test]
+    fn a_folder_in_settings_comes_before_the_home_folder() {
+        let chosen = abs("/my/approot");
+        let ok = [chosen.clone(), abs("/home/me/.stackql")];
+        let tried = RefCell::new(Vec::new());
+        let found = resolve(Some(&chosen), &installed_defaults(), writable(&ok, &tried)).unwrap();
+        assert_eq!(found.source, Source::Settings);
+        assert_eq!(*tried.borrow(), vec![chosen]);
     }
 
     #[test]

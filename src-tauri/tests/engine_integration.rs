@@ -332,6 +332,44 @@ async fn a_wrong_engine_path_is_reported_in_the_status() {
 }
 
 #[tokio::test]
+async fn an_installed_app_runs_its_engine_on_the_home_folder() {
+    if !engine_available() {
+        return;
+    }
+    // A folder that stands in for the home folder of the account. The real
+    // one is the operator's and is not touched by a test.
+    let root = scratch_approot("homefolder");
+    let home = root.join("home").join(".stackql");
+    let fallback = root.join("local").join("engine");
+
+    let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
+    let connection = LocalConnection::new(
+        ApprootDefaults {
+            first: Some((
+                home.clone(),
+                stackql_workbench_lib::engine::approot::Source::Home,
+            )),
+            fallback: fallback.clone(),
+        },
+        root.join("audit"),
+        settings,
+    )
+    .unwrap();
+    let status = connection.start().await;
+    assert_eq!(status.state, EngineState::Running, "{:?}", status.error);
+    assert_eq!(status.data_folder.as_deref(), Some(home.to_str().unwrap()));
+    assert_eq!(
+        status.data_folder_source.as_deref(),
+        Some("home folder, shared with the stackql command")
+    );
+    assert_eq!(status.data_folder_note, None);
+    assert!(home.is_dir(), "the engine's folder exists");
+    assert!(!fallback.exists(), "the fallback is left alone");
+
+    finish(connection, root).await;
+}
+
+#[tokio::test]
 async fn the_data_folder_defaults_to_beside_the_app_and_settings_override_it() {
     if !engine_available() {
         return;
@@ -345,7 +383,10 @@ async fn the_data_folder_defaults_to_beside_the_app_and_settings_override_it() {
     let settings = Arc::new(SettingsStore::in_memory(Settings::default()));
     let connection = LocalConnection::new(
         ApprootDefaults {
-            beside_app: Some(beside.clone()),
+            first: Some((
+                beside.clone(),
+                stackql_workbench_lib::engine::approot::Source::BesideApp,
+            )),
             fallback: fallback.clone(),
         },
         root.join("audit"),

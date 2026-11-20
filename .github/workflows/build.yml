@@ -1,0 +1,264 @@
+name: Build
+
+# The binaries the StackQL installers take: the Windows executable for each
+# processor the MSI comes for, and the Mac app. CI calls this on every run
+# and the release workflow calls it for a tag, so what a release ships is
+# built, checked and named the way every commit is.
+#
+# Nothing here is signed for release. The StackQL release signs what it
+# ships.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit, branch or tag to build. Empty builds what the caller runs on.
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  # The Mac app, and a test build of it as a disk image. The signature is ad
+  # hoc, with no Developer ID, and nothing is notarised.
+  macos:
+    name: Bundle (macOS, universal)
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      # A universal build needs the standard library for both architectures.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install webview dependencies
+        run: npm ci
+
+      # An Apple Silicon Mac runs no code without a signature. "-" asks for an
+      # ad hoc one, which needs no certificate.
+      - name: Build the app and the disk image
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        run: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
+
+      - name: Check the bundle
+        shell: bash
+        run: |
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app=$(ls -d "$bundle"/macos/*.app)
+          archs=$(lipo -archs "$app/Contents/MacOS/stackql-workbench")
+          echo "Architectures: $archs"
+          [[ "$archs" == *arm64* && "$archs" == *x86_64* ]]
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app"
+          ls -l "$bundle"/dmg
+
+      # The app must stand on its own too. Everything it links to has to be
+      # part of macOS: a system framework, or a library under /usr/lib. The
+      # page renderer is one of those frameworks, so there is nothing to ship
+      # with the app as there is on Windows.
+      - name: Check what the app asks the system for
+        shell: bash
+        run: |
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app=$(ls -d "$bundle"/macos/*.app)
+          needed=$(otool -L "$app/Contents/MacOS/stackql-workbench" \
+            | grep -E '^[[:space:]]' | awk '{print $1}' | sort -u)
+          echo "$needed"
+          foreign=$(echo "$needed" | grep -v -E '^(/System/Library/|/usr/lib/)' || true)
+          if [ -n "$foreign" ]; then
+            echo "Not part of macOS:"
+            echo "$foreign"
+            exit 1
+          fi
+          # Nothing else is carried in the bundle that would have to be signed.
+          find "$app/Contents" -type f \( -name '*.dylib' -o -name '*.so' \) -print
+
+      # The pages need a renderer of a certain age, and on a Mac the renderer
+      # is the one that macOS has. The bundle names the oldest macOS it runs
+      # on, so an older one refuses to open it. Both halves of the executable
+      # must be built for that version as well.
+      - name: Check the oldest macOS the app runs on
+        shell: bash
+        run: |
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app=$(ls -d "$bundle"/macos/*.app)
+          want=$(node -p "require('./src-tauri/tauri.conf.json').bundle.macOS.minimumSystemVersion")
+          declared=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")
+          echo "Wanted: $want"
+          echo "Declared in Info.plist: $declared"
+          [ "$declared" = "$want" ]
+          built=$(otool -l "$app/Contents/MacOS/stackql-workbench" \
+            | awk '$1 == "minos" {print $2}' | sort -u)
+          echo "Built for: $built"
+          [ "$built" = "$want" ]
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stackql-workbench-macos-universal
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      # The app on its own, for the StackQL PKG, which installs it beside the
+      # stackql command and signs what it ships. It is packed with tar because
+      # a bundle holds links and permissions that a zip of loose files loses.
+      - name: Pack the app for the installer
+        shell: bash
+        run: |
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app=$(ls -d "$bundle"/macos/*.app)
+          mkdir -p installer-input
+          tar -czf installer-input/stackql-workbench-macos-universal.app.tar.gz \
+            -C "$(dirname "$app")" "$(basename "$app")"
+          cd installer-input
+          shasum -a 256 stackql-workbench-macos-universal.app.tar.gz \
+            > stackql-workbench-macos-universal.app.tar.gz.sha256
+          cat stackql-workbench-macos-universal.app.tar.gz.sha256
+          tar -tzf stackql-workbench-macos-universal.app.tar.gz | head -n 12
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stackql-workbench-macos-universal-app
+          path: installer-input/*
+          if-no-files-found: error
+
+  # The executable the StackQL MSI installs beside stackql.exe. It is the
+  # optimised build, with no installer of its own.
+  #
+  # The MSI comes for x64 and for arm64, so there is one build for each, made
+  # on a runner of that processor. Nothing is built across.
+  windows:
+    name: Build (Windows, ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            os: windows-latest
+          - arch: arm64
+            os: windows-11-arm
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Kept apart from the cache of the checks, which hold a debug build.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: release
+
+      - name: Install webview dependencies
+        run: npm ci
+
+      - name: Build the executable
+        run: npm run tauri build -- --no-bundle
+
+      # The executable must stand on its own in the installer's folder. It
+      # carries its C runtime inside it, so what it asks the system for is
+      # Windows itself. This reads its import tables and fails on a runtime.
+      # It also fails when the executable is not built for this processor.
+      - name: Check what the executable asks the system for
+        run: node scripts/check-exe-imports.js src-tauri/target/release/stackql-workbench.exe ${{ matrix.arch }}
+
+      - name: Pack the executable for the installer
+        shell: pwsh
+        run: |
+          $exe = 'src-tauri/target/release/stackql-workbench.exe'
+          New-Item -ItemType Directory -Force installer-input | Out-Null
+          Copy-Item $exe installer-input/
+          $hash = (Get-FileHash installer-input/stackql-workbench.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  stackql-workbench.exe" | Set-Content installer-input/stackql-workbench.exe.sha256
+          Get-Item installer-input/stackql-workbench.exe | Format-List Name, Length
+          Get-Content installer-input/stackql-workbench.exe.sha256
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stackql-workbench-windows-${{ matrix.arch }}
+          path: installer-input/*
+          if-no-files-found: error
+
+  # The three files as a release names them, in one artifact, each with its
+  # SHA-256. The names follow the StackQL release: amd64 and arm64 for
+  # Windows, multiarch for the Mac. The release workflow attaches exactly
+  # these files, so what it attaches has been put together on every run
+  # before it.
+  assets:
+    name: Release assets
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: stackql-workbench-*
+          path: built
+
+      - name: Name the files as a release names them
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+
+          # Copies one built file under its release name, after checking it
+          # against the SHA-256 the job that built it wrote down.
+          take() {
+            local folder="built/$1" file="$2" name="$3"
+            local want have
+            want=$(awk '{print $1}' "$folder/$file.sha256" | tr -d '\r')
+            have=$(sha256sum "$folder/$file" | awk '{print $1}')
+            if [ "$want" != "$have" ]; then
+              echo "$folder/$file is not the file that was built: $have, expected $want"
+              exit 1
+            fi
+            cp "$folder/$file" "release-assets/$name"
+          }
+
+          take stackql-workbench-windows-x64 stackql-workbench.exe \
+            stackql-workbench_windows_amd64.exe
+          take stackql-workbench-windows-arm64 stackql-workbench.exe \
+            stackql-workbench_windows_arm64.exe
+          take stackql-workbench-macos-universal-app stackql-workbench-macos-universal.app.tar.gz \
+            stackql-workbench_darwin_multiarch.app.tar.gz
+
+          cd release-assets
+          for file in *; do
+            sha256sum "$file" > "$file.sha256"
+          done
+          ls -l
+          cat ./*.sha256
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stackql-workbench-release-assets
+          path: release-assets/*
+          if-no-files-found: error
+          # A job that is run again replaces what its first attempt left.
+          overwrite: true

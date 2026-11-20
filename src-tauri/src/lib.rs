@@ -43,13 +43,19 @@ fn setup(
     let cache_dir = app.path().app_cache_dir()?;
 
     let settings = Arc::new(SettingsStore::load(config_dir.join("settings.json")));
-    // The engine's provider cache goes in a folder beside this executable,
-    // or under the app data directory when that place cannot be written to.
-    // The operator can name another folder in settings. The engine's own
-    // default would be whatever directory the app was started from.
+    // The engine's provider cache. An installed app sits where an ordinary
+    // account cannot write, so it uses `.stackql` in the home folder, the
+    // one the stackql command uses. A build from this repository keeps a
+    // folder beside its executable. The last resort is a folder under the
+    // local app data directory: it is a cache, so it does not belong in the
+    // directory that follows a user between machines. The operator can name
+    // another folder in settings. The engine's own default would be
+    // whatever directory the app was started from.
     let approot_defaults = ApprootDefaults::for_executable(
         std::env::current_exe().ok().as_deref(),
-        data_dir.join("engine"),
+        app.path().home_dir().ok().as_deref(),
+        app.path().app_local_data_dir()?.join("engine"),
+        |path| path.is_file(),
     );
     let connection: Arc<dyn Connection> = Arc::new(LocalConnection::new(
         approot_defaults,
@@ -135,6 +141,7 @@ fn log_engine_state(log: &AppLog, status: &EngineStatus) {
                 "version": status.version,
                 "endpoint": status.endpoint,
                 "dataFolder": status.data_folder,
+                "dataFolderFrom": status.data_folder_source,
             }),
         ),
         EngineState::Failed => log.error(
