@@ -165,9 +165,12 @@ pub fn run() {
     // window to say anything in, so say it in a dialog of the system's and
     // stop. This returns at once where a renderer is found.
     webview_runtime::require();
+    // Note the user's and the machine's variables as they are now, so one
+    // set later is passed to the engine when it is restarted.
+    engine::environment::capture_baseline();
 
     let built = tauri::Builder::default()
-        // The save dialog, used from the host only. The webview has no access to it.
+        // The save and open dialogs, used from the host only. The webview has no access to them.
         .plugin(tauri_plugin_dialog::init())
         // Opens the Help menu's links in the browser, from the host only.
         .plugin(tauri_plugin_opener::init())

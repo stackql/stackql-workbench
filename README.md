@@ -258,7 +258,7 @@ When that folder is there the app uses it and does not look at what the system h
 
 An installed app keeps the engine's provider cache in `.stackql` in your home folder. That is where the `stackql` command keeps it when it is started there, as the command shell the MSI installs does, so providers you pulled with the command are there in the app, and the other way round. A build from this repository keeps a `.stackql` folder beside its executable instead, so a first run of one lists no providers. Run `REGISTRY PULL github;` in the editor to install one. To use another folder, set it under Settings.
 
-Provider credentials are environment variables the engine reads. On Windows the engine sees the variables of your user account. To use a dotenv file, set it under Settings.
+Provider credentials are environment variables the engine reads. On Windows the engine sees the variables of your user account and of the machine. One set while the app is open, with `setx` or in the system settings, is used after Providers > Reload Credentials, which restarts the engine. The app does not need to be closed. To use a dotenv file, set it under Settings.
 
 The app opens in chat. The side menu leads to the explorer, which holds the provider tree, the query editor and the results grid, to the query library, and to the activity list. The File, Edit, View, Query, Providers and Help menus repeat those.
 

@@ -62,6 +62,10 @@ windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security",
   "Win32_System_JobObjects",
+  # A child's environment: the user's and the machine's variables as the
+  # registry holds them when the child starts, read with the app's token.
+  "Win32_System_Environment",
+  "Win32_System_Threading",
   # The dialog shown when no WebView2 runtime is found. The second is needed
   # for the first to define it.
   "Win32_UI_Controls",

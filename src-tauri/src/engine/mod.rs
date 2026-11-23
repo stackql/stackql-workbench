@@ -5,6 +5,7 @@
 
 pub mod approot;
 pub mod discovery;
+pub mod environment;
 pub mod logbuf;
 pub mod port;
 pub mod supervisor;

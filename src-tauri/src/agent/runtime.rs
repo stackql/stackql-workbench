@@ -183,16 +183,30 @@ pub struct DelegateInfo {
 
 /// What a delegated session was started with. A change in any of it needs
 /// a new session, because the safety mode is fixed on the agent's command
-/// line.
+/// line, and the agent and its engine keep the environment they started
+/// with.
 #[derive(PartialEq, Eq)]
 struct DelegateKey {
     mode: SafetyMode,
+    /// The engine's start count when the session opened. A restart, for
+    /// example to read credentials again, needs a new session for the same
+    /// reason.
+    engine: u64,
     request: DelegateRequest,
+}
+
+/// What an engine session was opened with. The MCP server keeps the safety
+/// mode and the environment it was started with, so a change in either
+/// needs a new one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct SessionKey {
+    mode: SafetyMode,
+    engine: u64,
 }
 
 #[derive(Default)]
 struct State {
-    session: Option<(SafetyMode, McpSession)>,
+    session: Option<(SessionKey, McpSession)>,
     messages: Vec<Message>,
     delegate: Option<(DelegateKey, DelegateSession)>,
 }
@@ -373,19 +387,25 @@ impl AgentRuntime {
         *lock(&self.stop) = Some(stop.clone());
         let _guard = TurnGuard { runtime: self };
 
-        let key = DelegateKey { mode, request };
+        let key = DelegateKey {
+            mode,
+            engine: self.connection.generation(),
+            request,
+        };
         let reusable = state
             .delegate
             .as_ref()
             .is_some_and(|(current, session)| *current == key && !session.is_closed());
         if !reusable {
-            let previous = state.delegate.take().map(|(old, _)| old.mode);
+            let previous = state.delegate.take().map(|(old, _)| (old.mode, old.engine));
             let (session, tools) = self.open_delegate(&key.request, mode).await?;
-            if let Some(old_mode) = previous {
-                let cause = if old_mode == mode {
-                    "The previous session ended"
-                } else {
+            if let Some((old_mode, old_engine)) = previous {
+                let cause = if old_mode != mode {
                     "The safety mode changed"
+                } else if old_engine != key.engine {
+                    "The engine was restarted"
+                } else {
+                    "The previous session ended"
                 };
                 emit(AgentEvent::Notice {
                     message: format!(
@@ -441,10 +461,15 @@ impl AgentRuntime {
             session, messages, ..
         } = &mut *state;
 
-        // A session is tied to the safety mode it was started with.
+        // A session is tied to the safety mode and the engine start it was
+        // opened under. The conversation itself carries over to a new one.
+        let key = SessionKey {
+            mode,
+            engine: self.connection.generation(),
+        };
         let reusable = session
             .as_ref()
-            .is_some_and(|(current, s)| *current == mode && !s.is_closed());
+            .is_some_and(|(current, s)| *current == key && !s.is_closed());
         if !reusable {
             if let Some((_, old)) = session.take() {
                 old.close().await;
@@ -456,7 +481,7 @@ impl AgentRuntime {
                 protocol_version: fresh.protocol_version().to_string(),
                 tools: fresh.tools().len(),
             });
-            *session = Some((mode, fresh));
+            *session = Some((key, fresh));
         }
         let Some((_, mcp)) = session.as_ref() else {
             return Err(HostError::Agent("No engine session.".to_string()));

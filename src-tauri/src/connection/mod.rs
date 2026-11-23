@@ -156,6 +156,11 @@ pub trait Connection: Send + Sync + 'static {
     /// statement that is running, since the engine has no cancel.
     fn restart(&self) -> BoxFuture<'_, EngineStatus>;
 
+    /// Counts the times the engine has been started. A channel the agent
+    /// opened under an earlier count was set up with what the engine had
+    /// then, its credentials among them, so the agent opens a new one.
+    fn generation(&self) -> u64;
+
     /// Stops the engine. Called when the app exits.
     fn shutdown(&self) -> BoxFuture<'_, ()>;
 
