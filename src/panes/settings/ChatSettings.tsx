@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   host,
   toHostError,
@@ -6,7 +6,10 @@ import {
   type BackendKind,
   type BackendOption,
   type DelegateInfo,
+  type ModelOption,
 } from '../../host';
+import { canListModels, listsOnOpen, modelLabel, saveBlocker } from '../../lib/models';
+import { PathInput } from './PathInput';
 
 const LABELS: Record<BackendKind, string> = {
   github_copilot: 'GitHub Copilot (the Copilot CLI and its sign-in)',
@@ -49,6 +52,18 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
   // What the agent said about itself, once asked.
   const [info, setInfo] = useState<DelegateInfo | null>(null);
   const [asking, setAsking] = useState(false);
+  // The models an API key backend's provider listed, once asked.
+  const [initial] = useState(() => {
+    const opening = config.backends.find((b) => b.kind === config.inference?.kind);
+    const url = config.inference?.baseUrl ?? '';
+    return { option: opening, baseUrl: url, list: listsOnOpen(opening, url) };
+  });
+  const [models, setModels] = useState<ModelOption[] | null>(null);
+  const [listing, setListing] = useState(initial.list);
+  const [listError, setListError] = useState<string | null>(null);
+  // Only the answer to the latest request is used, so an answer for a
+  // backend the operator has moved away from is dropped.
+  const latest = useRef(0);
   const kindId = useId();
   const modelId = useId();
   const urlId = useId();
@@ -57,12 +72,51 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
 
   const option: BackendOption | undefined = config.backends.find((b) => b.kind === kind);
   const delegated = option?.delegated ?? false;
-  const sameBackend = config.inference?.kind === kind;
-  const keyStored = sameBackend && config.hasKey;
-  const needsKey =
-    option !== undefined && !option.keyOptional && !keyStored && apiKey.trim() === '';
-  const needsModel =
-    option !== undefined && !delegated && option.defaultModel === '' && model.trim() === '';
+  const keyStored = option?.keyStored ?? false;
+  const blocker = saveBlocker(option, model, apiKey);
+
+  const fetchModels = useCallback((forKind: BackendKind, url: string, key: string) => {
+    latest.current += 1;
+    const request = latest.current;
+    host.agent.listModels(forKind, url.trim() || null, key.trim() || null).then(
+      (list) => {
+        if (latest.current === request) {
+          setModels(list);
+          setListError(null);
+          setListing(false);
+        }
+      },
+      (reason: unknown) => {
+        if (latest.current === request) {
+          setModels(null);
+          setListError(toHostError(reason).message);
+          setListing(false);
+        }
+      },
+    );
+  }, []);
+
+  // Opened on a backend whose provider can be asked straight away.
+  useEffect(() => {
+    if (initial.list && initial.option) {
+      fetchModels(initial.option.kind, initial.baseUrl, '');
+    }
+  }, [initial, fetchModels]);
+
+  const startListing = (forKind: BackendKind, url: string, key: string) => {
+    setListing(true);
+    setListError(null);
+    fetchModels(forKind, url, key);
+  };
+
+  // Drops a list, and any answer still on its way, when what it was asked
+  // for has changed.
+  const forgetModels = () => {
+    latest.current += 1;
+    setModels(null);
+    setListing(false);
+    setListError(null);
+  };
 
   const finish = (work: Promise<AgentConfig>) => {
     setBusy(true);
@@ -106,6 +160,7 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
     setBaseUrl('');
     setProgram('');
     setInfo(null);
+    forgetModels();
     finish(host.agent.clearConfig());
   };
 
@@ -156,7 +211,8 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
         className="mb-1 h-7 w-full rounded border border-line bg-surface px-1"
         value={kind}
         onChange={(event) => {
-          setKind(event.target.value as BackendKind | '');
+          const next = event.target.value as BackendKind | '';
+          setKind(next);
           setModel('');
           setBaseUrl('');
           setProgram('');
@@ -164,6 +220,11 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
           setInfo(null);
           setError(null);
           setSaved(false);
+          forgetModels();
+          const nextOption = config.backends.find((b) => b.kind === next);
+          if (nextOption && listsOnOpen(nextOption, '')) {
+            startListing(nextOption.kind, '', '');
+          }
         }}
       >
         <option value="">None</option>
@@ -187,18 +248,19 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
                 Optional. Leave empty to find copilot on PATH. If it is not signed in, run copilot
                 login in a terminal first.
               </p>
-              <input
-                id={programId}
-                type="text"
-                spellCheck={false}
-                className={`${input} mb-2`}
-                placeholder="Found on PATH"
-                value={program}
-                onChange={(event) => {
-                  setProgram(event.target.value);
-                  setInfo(null);
-                }}
-              />
+              <div className="mb-2">
+                <PathInput
+                  id={programId}
+                  purpose="agent"
+                  label="the Copilot CLI"
+                  placeholder="Found on PATH"
+                  value={program}
+                  onChange={(value) => {
+                    setProgram(value);
+                    setInfo(null);
+                  }}
+                />
+              </div>
 
               <label htmlFor={modelId} className="block font-semibold">
                 Model
@@ -285,21 +347,6 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
             </>
           ) : (
             <>
-              <label htmlFor={modelId} className="block font-semibold">
-                Model
-              </label>
-              <input
-                id={modelId}
-                type="text"
-                spellCheck={false}
-                className={`${input} mb-2`}
-                placeholder={option.defaultModel || 'The model your server provides'}
-                value={model}
-                onChange={(event) => {
-                  setModel(event.target.value);
-                }}
-              />
-
               <label htmlFor={urlId} className="block font-semibold">
                 Address
               </label>
@@ -312,6 +359,8 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
                 value={baseUrl}
                 onChange={(event) => {
                   setBaseUrl(event.target.value);
+                  // Another server can offer other models.
+                  forgetModels();
                 }}
               />
 
@@ -327,7 +376,7 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
                 type="password"
                 autoComplete="off"
                 spellCheck={false}
-                className={input}
+                className={`${input} mb-2`}
                 placeholder={
                   keyStored
                     ? 'A key is stored. Enter a new one to replace it.'
@@ -340,6 +389,71 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
                   setApiKey(event.target.value);
                 }}
               />
+
+              <label htmlFor={modelId} className="block font-semibold">
+                Model
+              </label>
+              <p className="mb-1 text-ink-muted">
+                {option.defaultModel
+                  ? `Leave it on the default to use ${option.defaultModel}. List models asks the provider which models your key can use.`
+                  : 'List models asks the server which models it offers.'}
+              </p>
+              <div className="mb-1 flex items-center gap-2">
+                {models ? (
+                  <select
+                    id={modelId}
+                    className="h-7 min-w-0 flex-1 rounded border border-line bg-surface px-1"
+                    value={model}
+                    onChange={(event) => {
+                      setModel(event.target.value);
+                    }}
+                  >
+                    <option value="">
+                      {option.defaultModel ? `Default (${option.defaultModel})` : 'Choose a model'}
+                    </option>
+                    {/* Keep a saved model the provider does not list visible. */}
+                    {model !== '' && !models.some((m) => m.id === model) && (
+                      <option value={model}>{`${model} (not in the list)`}</option>
+                    )}
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {modelLabel(m)}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id={modelId}
+                    type="text"
+                    spellCheck={false}
+                    className={`${input} min-w-0 flex-1`}
+                    placeholder={option.defaultModel || 'The model your server provides'}
+                    value={model}
+                    onChange={(event) => {
+                      setModel(event.target.value);
+                    }}
+                  />
+                )}
+                <button
+                  type="button"
+                  className={`${plain} shrink-0`}
+                  disabled={listing || !canListModels(option, apiKey)}
+                  title={canListModels(option, apiKey) ? '' : 'Enter an API key first.'}
+                  onClick={() => {
+                    startListing(option.kind, baseUrl, apiKey);
+                  }}
+                >
+                  {listing ? 'Listing' : models ? 'List again' : 'List models'}
+                </button>
+              </div>
+              {models && (
+                <p className="selectable text-[12px] text-ink-muted">
+                  {models.length === 1 ? '1 model listed.' : `${models.length} models listed.`}
+                </p>
+              )}
+              {listError && (
+                <p className="selectable text-[12px] break-words text-danger">{listError}</p>
+              )}
             </>
           )}
         </>
@@ -350,19 +464,26 @@ export function ChatSettings({ config, onChanged }: ChatSettingsProps) {
       )}
 
       <div className="mt-3 flex items-center justify-end gap-2">
-        {saved && !error && <span className="mr-auto text-ok">Saved.</span>}
+        {saved && !error ? (
+          <span className="mr-auto text-ok">Saved.</span>
+        ) : (
+          blocker && <span className="mr-auto text-[12px] text-ink-muted">{blocker}</span>
+        )}
         {config.inference && (
-          <button type="button" className={plain} disabled={busy} onClick={remove}>
+          <button
+            type="button"
+            className={plain}
+            disabled={busy}
+            title="Removes the backend and the API key stored for it."
+            onClick={remove}
+          >
             Remove model backend
           </button>
         )}
         <button
           type="button"
           className="h-7 rounded bg-brand px-3 text-on-brand hover:bg-brand-dark disabled:opacity-50"
-          disabled={busy || kind === '' || needsKey || needsModel}
-          title={
-            needsKey ? 'Enter an API key first.' : needsModel ? 'Enter the model name first.' : ''
-          }
+          disabled={busy || kind === '' || blocker !== null}
           onClick={save}
         >
           {busy ? 'Saving' : 'Save model backend'}

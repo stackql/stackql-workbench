@@ -30,7 +30,7 @@ use crate::agent::backend::{
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
 
-const API_VERSION: &str = "2026-10-21";
+pub(super) const API_VERSION: &str = "2026-10-21";
 /// Kept below the size at which a non-streaming request risks a timeout.
 const MAX_TOKENS: u32 = 16_000;
 
@@ -96,7 +96,7 @@ fn uses_fallback(model: &str) -> bool {
     MODELS_WITH_FALLBACK.contains(&model)
 }
 
-fn error_message(body: &Value) -> Option<String> {
+pub(super) fn error_message(body: &Value) -> Option<String> {
     let error = body.get("error")?;
     let message = error.get("message")?.as_str()?;
     let kind = error.get("type").and_then(Value::as_str).unwrap_or("");

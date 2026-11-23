@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { host, toHostError, type EngineStatus, type Settings } from '../../host';
 import { IconButton } from '../../ui/IconButton';
 import { Close } from '../../ui/icons';
+import { PathInput } from './PathInput';
 
 interface SettingsDialogProps {
   status: EngineStatus;
@@ -143,16 +144,14 @@ export function SettingsDialog({ status, onClose, section, children }: SettingsD
             Leave empty to use the engine installed with this app. Where there is none, the
             STACKQL_BIN variable is tried, then the usual install locations, then PATH.
           </p>
-          <input
+          <PathInput
             id={pathId}
-            type="text"
-            spellCheck={false}
-            className="selectable h-7 w-full rounded border border-line bg-surface px-2 font-mono text-[12px]"
+            purpose="engine"
+            label="the stackql location"
             placeholder={status.location ?? 'Path to the stackql binary'}
+            fallback={status.location}
             value={enginePath}
-            onChange={(event) => {
-              setEnginePath(event.target.value);
-            }}
+            onChange={setEnginePath}
           />
           <p className="selectable mt-1 mb-3 text-[12px] text-ink-muted">
             {status.location
@@ -171,16 +170,14 @@ export function SettingsDialog({ status, onClose, section, children }: SettingsD
             was not installed uses a .stackql folder beside itself. Providers pulled into one folder
             are not seen from another.
           </p>
-          <input
+          <PathInput
             id={approotId}
-            type="text"
-            spellCheck={false}
-            className="selectable h-7 w-full rounded border border-line bg-surface px-2 font-mono text-[12px]"
+            purpose="dataFolder"
+            label="the engine data folder"
             placeholder={status.dataFolder ?? 'Full path to a folder'}
+            fallback={status.dataFolder}
             value={approot}
-            onChange={(event) => {
-              setApproot(event.target.value);
-            }}
+            onChange={setApproot}
           />
           <p className="selectable mt-1 text-[12px] text-ink-muted">
             {status.dataFolder
@@ -200,16 +197,14 @@ export function SettingsDialog({ status, onClose, section, children }: SettingsD
             Optional. A dotenv file with the environment variables your providers need. The engine
             reads it at startup. This app never reads or shows its contents.
           </p>
-          <input
+          <PathInput
             id={envId}
-            type="text"
-            spellCheck={false}
-            className="selectable h-7 w-full rounded border border-line bg-surface px-2 font-mono text-[12px]"
+            purpose="envFile"
+            label="the credentials file"
             placeholder="Path to a .env file"
+            fallback={status.dataFolder}
             value={envFile}
-            onChange={(event) => {
-              setEnvFile(event.target.value);
-            }}
+            onChange={setEnvFile}
           />
 
           {error && <p className="selectable mt-3 text-danger">{error}</p>}

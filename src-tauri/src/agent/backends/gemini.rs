@@ -82,7 +82,7 @@ impl InferenceBackend for Gemini {
     }
 }
 
-fn error_message(body: &Value) -> Option<String> {
+pub(super) fn error_message(body: &Value) -> Option<String> {
     let error = body.get("error")?;
     let message = error.get("message")?.as_str()?;
     let status = error.get("status").and_then(Value::as_str).unwrap_or("");
@@ -90,7 +90,7 @@ fn error_message(body: &Value) -> Option<String> {
 }
 
 /// A bad key comes back as 400 INVALID_ARGUMENT, not as 401.
-fn reclassify_key_error(err: InferenceError) -> InferenceError {
+pub(super) fn reclassify_key_error(err: InferenceError) -> InferenceError {
     match err {
         InferenceError::InvalidRequest(message) if message.contains("API key") => {
             InferenceError::Auth(message)

@@ -193,12 +193,25 @@ export interface BackendOption {
   defaultBaseUrl: string;
   /** A local server usually needs no key. */
   keyOptional: boolean;
+  /** Whether a key for this backend is in the keychain. Each backend keeps its own. */
+  keyStored: boolean;
   /**
    * An agent the operator installed runs the model. There is no key and no
    * address to enter, and no approval prompt.
    */
   delegated: boolean;
 }
+
+/** A model an API key backend offers, as its provider lists it. */
+export interface ModelOption {
+  /** What goes in the settings and on the wire. */
+  id: string;
+  /** What the provider calls it. The id when it gives no name. */
+  name: string;
+}
+
+/** What a path in the settings is for. The host picks the dialog to match. */
+export type PathPurpose = 'engine' | 'dataFolder' | 'envFile' | 'agent';
 
 /** A model a delegated agent offers. */
 export interface AgentModel {
@@ -220,7 +233,6 @@ export interface DelegateInfo {
 export interface AgentConfig {
   /** Null means no model backend is set up yet. */
   inference: InferenceSettings | null;
-  hasKey: boolean;
   safetyMode: SafetyMode;
   backends: BackendOption[];
   /** False when keys cannot be kept in the OS keychain on this machine. */

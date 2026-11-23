@@ -7,6 +7,7 @@
 
 pub mod anthropic;
 pub mod gemini;
+pub mod models;
 pub mod openai;
 
 use std::sync::Arc;
@@ -47,6 +48,17 @@ pub fn default_base_url(kind: BackendKind) -> &'static str {
     }
 }
 
+/// The operator's address, or the provider's own when none is set, without
+/// a trailing slash.
+pub(crate) fn resolve_base_url(kind: BackendKind, base_url: Option<&str>) -> String {
+    base_url
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| default_base_url(kind))
+        .trim_end_matches('/')
+        .to_string()
+}
+
 /// Builds the backend the settings describe.
 pub fn build(
     settings: &InferenceSettings,
@@ -68,14 +80,7 @@ pub fn build(
             "No model is set. Choose one in Settings.".to_string(),
         ));
     }
-    let base_url = settings
-        .base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|url| !url.is_empty())
-        .unwrap_or_else(|| default_base_url(settings.kind))
-        .trim_end_matches('/')
-        .to_string();
+    let base_url = resolve_base_url(settings.kind, settings.base_url.as_deref());
     let api_key = api_key.filter(|key| !key.trim().is_empty());
     if api_key.is_none() && !settings.kind.key_optional() {
         return Err(InferenceError::Auth(
@@ -129,6 +134,34 @@ async fn post_json(
     for (name, value) in headers {
         request = request.header(*name, *value);
     }
+    read_json(request, error_message).await
+}
+
+/// Sends a GET and returns the parsed reply, the same way `post_json` does.
+async fn get_json(
+    http: &reqwest::Client,
+    url: &str,
+    query: &[(&str, &str)],
+    headers: &[(&str, &str)],
+    error_message: fn(&Value) -> Option<String>,
+) -> Result<Value, InferenceError> {
+    let mut url = reqwest::Url::parse(url).map_err(|err| {
+        InferenceError::InvalidRequest(format!("the address is not valid: {err}"))
+    })?;
+    if !query.is_empty() {
+        url.query_pairs_mut().extend_pairs(query);
+    }
+    let mut request = http.get(url);
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    read_json(request, error_message).await
+}
+
+async fn read_json(
+    request: reqwest::RequestBuilder,
+    error_message: fn(&Value) -> Option<String>,
+) -> Result<Value, InferenceError> {
     let response = request
         .send()
         .await

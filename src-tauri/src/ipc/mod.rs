@@ -4,6 +4,7 @@
 //! side is `src/host/`, the only place in the webview that touches Tauri.
 
 pub mod links;
+pub mod pick;
 pub mod save;
 
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ use crate::activity::{Activity, History, HistoryEntry, read_audit};
 use crate::agent::approvals::ApprovalDecision;
 use crate::agent::backend::BackendKind;
 use crate::agent::backends;
+use crate::agent::backends::models::{self, ModelOption};
 use crate::agent::runtime::{
     AgentEvent, AgentRuntime, DelegateInfo, DelegateRequest, Emit, TurnSummary,
 };
@@ -315,7 +317,6 @@ pub async fn explorer_method_fields(
 pub struct AgentConfigView {
     /// `None` means chat is not configured and the chat pane stays hidden.
     pub inference: Option<InferenceSettings>,
-    pub has_key: bool,
     pub safety_mode: SafetyMode,
     pub backends: Vec<BackendOption>,
     /// False when keys cannot be kept in the OS keychain on this machine.
@@ -330,19 +331,24 @@ pub struct BackendOption {
     pub default_model: String,
     pub default_base_url: String,
     pub key_optional: bool,
+    /// Whether a key for this backend is in the keychain. Each backend keeps
+    /// its own, so switching back to one does not ask for its key again.
+    pub key_stored: bool,
     /// An agent the operator installed runs the model. There is no key and
     /// no address to enter, and no approval prompt.
     pub delegated: bool,
 }
 
+/// The key stored for a backend, if there is one.
+fn stored_key(state: &AppState, kind: BackendKind) -> HostResult<Option<String>> {
+    match kind.secret_name() {
+        Some(name) => state.secrets.get(name),
+        None => Ok(None),
+    }
+}
+
 fn agent_config_view(state: &AppState) -> AgentConfigView {
     let settings = state.settings.get();
-    let has_key = settings.inference.as_ref().is_some_and(|inference| {
-        inference
-            .kind
-            .secret_name()
-            .is_some_and(|name| state.secrets.get(name).is_ok_and(|key| key.is_some()))
-    });
     let backends = BackendKind::ALL
         .into_iter()
         .map(|kind| BackendOption {
@@ -350,12 +356,12 @@ fn agent_config_view(state: &AppState) -> AgentConfigView {
             default_model: backends::default_model(kind).to_string(),
             default_base_url: backends::default_base_url(kind).to_string(),
             key_optional: kind.key_optional(),
+            key_stored: stored_key(state, kind).is_ok_and(|key| key.is_some()),
             delegated: kind.is_delegated(),
         })
         .collect();
     AgentConfigView {
         inference: settings.inference,
-        has_key,
         safety_mode: settings.safety_mode,
         backends,
         keychain_available: state.keychain_available,
@@ -388,6 +394,29 @@ pub async fn agent_config_save(
     // A different model should not inherit a conversation it did not have.
     state.agent.reset().await;
     Ok(agent_config_view(&state))
+}
+
+/// The models a backend offers, as its provider lists them. `api_key` is a
+/// key the operator has typed and not saved yet. Without one, the key stored
+/// for that backend is used. The key is sent to the provider and nowhere
+/// else.
+#[tauri::command]
+pub async fn agent_list_models(
+    state: State<'_, AppState>,
+    kind: BackendKind,
+    base_url: Option<String>,
+    api_key: Option<String>,
+) -> HostResult<Vec<ModelOption>> {
+    let typed = api_key
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+    let key = match typed {
+        Some(key) => Some(key),
+        None => stored_key(&state, kind)?,
+    };
+    models::list(kind, base_url.as_deref(), key)
+        .await
+        .map_err(|err| HostError::Agent(err.to_string()))
 }
 
 /// Removes the chat backend and its stored key. The chat pane goes away and

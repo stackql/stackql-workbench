@@ -17,7 +17,7 @@ The planned capabilities are listed below.
 - Chat: the view the app opens in. It needs a model backend, and asks for one the first time a message is sent
 - Answers with results: a turn is shown as its answer, with the result set as a table that sorts and downloads, and as a chart when one is asked for
 - Approvals and activity: mutations proposed by a model wait for the operator, and every agent action is logged
-- Settings: engine path, credentials profile, safety mode, inference backend
+- Settings: engine path, credentials profile, safety mode, inference backend. Every path can be typed or chosen in the system's file dialog
 
 ## Architecture
 
@@ -265,7 +265,7 @@ The app opens in chat. The side menu leads to the explorer, which holds the prov
 Chat needs a model backend. The first time you send a message without one, the model backend settings open. There are two kinds.
 
 - GitHub Copilot: uses the Copilot CLI installed on this machine and the sign-in it already has. Install the CLI, run `copilot login` once, then choose GitHub Copilot. Requests count against your Copilot plan, and the settings list each model with what it costs. There is an experimental setting that lets the agent hand the parts of a request that spans several providers to subagents. It is off by default.
-- An API key for Gemini, Anthropic, or an OpenAI-compatible server, which covers local inference. The key goes to the operating system keychain.
+- An API key for Gemini, Anthropic, or an OpenAI-compatible server, which covers local inference. The key goes to the operating system keychain, and each backend keeps its own. List models asks the provider which models the key can use, and the model is then chosen from that list. With a key already stored the list is read when the settings open.
 
 With an API key backend, independent queries the model asks for in one step run at the same time.
 
