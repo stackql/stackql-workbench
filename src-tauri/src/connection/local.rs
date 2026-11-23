@@ -500,6 +500,10 @@ impl Connection for LocalConnection {
         self.start()
     }
 
+    fn generation(&self) -> u64 {
+        self.shared.generation.load(Ordering::SeqCst)
+    }
+
     fn shutdown(&self) -> BoxFuture<'_, ()> {
         async move {
             let mut child = self.lifecycle.lock().await;

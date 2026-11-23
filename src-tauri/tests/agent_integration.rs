@@ -791,6 +791,43 @@ async fn changing_the_safety_mode_opens_a_new_engine_session() {
     teardown(fx).await;
 }
 
+/// Reload Credentials restarts the engine. The agent's MCP server keeps the
+/// environment it was started with, so the next turn must open a new one.
+#[tokio::test]
+async fn restarting_the_engine_opens_a_new_engine_session() {
+    if !engine_available() {
+        return;
+    }
+    let fx = fixture("restart").await;
+    let model = Scripted::new(vec![says("one"), says("two"), says("three")]);
+
+    let mut sessions = Vec::new();
+    for restart_first in [false, false, true] {
+        if restart_first {
+            let status = fx.connection.restart().await;
+            assert_eq!(status.state, EngineState::Running, "{:?}", status.error);
+        }
+        let (emit, events) = collector();
+        fx.runtime
+            .send(model.clone(), SafetyMode::Safe, "hi".into(), emit)
+            .await
+            .unwrap();
+        let started = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::SessionStarted { .. }))
+            .count();
+        sessions.push(started);
+    }
+    // Opened once, reused, and opened again after the restart.
+    assert_eq!(sessions, vec![1, 0, 1]);
+    // The conversation carried over to the new session.
+    assert_eq!(model.seen()[2].messages.len(), 5);
+
+    teardown(fx).await;
+}
+
 #[tokio::test]
 async fn without_a_running_engine_the_turn_fails_plainly() {
     let approot = std::env::temp_dir().join(format!("wb-agent-it-{}-noengine", std::process::id()));

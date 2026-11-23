@@ -11,6 +11,7 @@ import type {
   AgentEvent,
   AppLink,
   ApprovalDecision,
+  BackendKind,
   DelegateInfo,
   EngineStatus,
   Field,
@@ -20,6 +21,8 @@ import type {
   LibraryIndex,
   Method,
   MethodField,
+  ModelOption,
+  PathPurpose,
   Provider,
   ProviderIcon,
   QueryEvent,
@@ -130,7 +133,23 @@ export const host = {
      */
     delegateInfo: (program: string | null) =>
       invoke<DelegateInfo>('agent_delegate_info', { program }),
+
+    /**
+     * The models an API key backend offers, as its provider lists them.
+     * `apiKey` is a key typed and not saved yet. With null, the key stored
+     * for that backend is used. Null `baseUrl` means the provider's own.
+     */
+    listModels: (kind: BackendKind, baseUrl: string | null, apiKey: string | null) =>
+      invoke<ModelOption[]>('agent_list_models', { kind, baseUrl, apiKey }),
   },
+
+  /**
+   * Asks the operator for a file or a folder in the system's dialog. The
+   * host decides which, from `purpose`. `current` only decides where the
+   * dialog opens. Resolves to the path, or to null when it was dismissed.
+   */
+  pickPath: (purpose: PathPurpose, current: string | null) =>
+    invoke<string | null>('pick_path', { purpose, current }),
 
   /** Closes the window, which ends the app and stops the engine. */
   closeWindow: () => getCurrentWindow().close(),

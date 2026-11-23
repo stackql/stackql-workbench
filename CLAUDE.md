@@ -17,6 +17,7 @@ Pre-alpha. This much has landed on Windows.
 - Most of M1, the query IDE: editor tabs, completion from provider metadata, the JSON cell viewer, statement history, export as CSV and JSON, and a `stackql exec` command for a statement.
 - A query library view: the entries of the published query library, for the operator, with no chat backend needed.
 - A conversation that shows a turn as its answer: the calls the assistant made are a list of steps that folds away, a call that failed is written to the app's log and not listed, the result set is a table that sorts and downloads, and a model can ask for a chart with a chart block.
+- Version 0.2.0, the settings: the model of an API key backend is chosen from the list its provider gives, each backend keeps its own key, the reason a backend cannot be saved yet is said beside the button, and every path has a Browse button that opens the system's dialog.
 
 Not started: the rest of M1 (saved `.iql` files, cancel, a streaming grid), M2 (packaging), plan sign-in and any delegated agent other than the Copilot CLI. Replies from the API key backends are not streamed yet. Replies from the Copilot CLI are.
 
@@ -47,6 +48,8 @@ What has and has not been run:
 - The data folder of an installed app was checked on Windows with the app and a copy of `stackql.exe` in a folder the account could read and run from but not write to, which is what `Program Files` is to an ordinary account. The app was started with that folder as its working folder. It started the engine beside it, the engine's data folder was `<app data dir>/engine`, and nothing was added to the folder of the app. The real `Program Files` was not used, since that needs an administrator, and the note in the settings pane was not looked at in that run.
 - That run was before an installed app used the home folder. After the change the same layout was run again: the engine beside the app was started on `.stackql` in the home folder, the app listed the providers the operator's own `stackql` command had pulled there, and nothing was added to the folder of the app. The app alone in a folder it could write to, which is what a build is, kept a `.stackql` folder beside itself and listed no providers. The fallback to the local app data directory has run only in tests, and the macOS rule only as unit tests.
 - The token counts were seen in the built app with a scripted model, and for real through the Copilot CLI: one prompt to a probe to see what the CLI sends, and one turn through the app, which showed the count on the steps line and in the log. The counts of Gemini, Anthropic and an OpenAI-compatible server are read as their documentation describes and tested against stubs, not against the real services.
+- The settings of 0.2.0 were driven in a debug build on Windows, in both themes. Opened on an OpenAI-compatible backend with the address of a stand-in server, the pane asked it for its models once, with no key, and showed them as a list with the saved model chosen. Switched to Gemini with no key stored, it said "Enter an API key to save." beside a Save button that was not available. Browse opened the system's folder dialog for the data folder and its file dialog for the credentials file and for the engine, each under its own title, and the path chosen went into the field. Cancel left the field as it was. The model lists of Gemini, Anthropic and OpenAI themselves have not been read: each is tested against a stub that checks what goes on the wire. The dialogs have not been opened on macOS.
+- Credentials set while the app is open were checked on Windows in a debug build, through the editor. The app was started from a process whose environment lacked `CLOUDFLARE_API_TOKEN`, which was stored for the user before, and a Cloudflare query returned its row. With `DIGITALOCEAN_TOKEN` stored nowhere a query failed with "credentialsenvvar references empty string". A made-up token was then stored for the user in the registry while the app ran, and after Reload Credentials the same query came back with DigitalOcean's 401, so the engine had sent it. Deleted again, and after another Reload Credentials, the query failed as at first. The app was not closed in between. A unit test stores a throwaway user variable in the real registry and sees it reach a child's environment. An integration test checks that the next turn opens a new engine session after a restart. The Copilot CLI's restart after an engine restart was not run.
 - The supervisor's tests see a child end by waiting on a handle to it on Windows, and with `kill -0` on Unix. They used to ask `tasklist`, which on a busy machine could use up the time a test allowed. They passed 30 runs in a row with every core busy. With twice as many busy loops as cores a different test, `an_unexpected_exit_is_reported_with_its_code`, missed its 10 second limit twice in 30 runs.
 
 Update this section when a milestone lands. The roadmap is in `README.md`.
@@ -88,7 +91,7 @@ These are the chosen defaults. Check the current stable version and API of each 
 | Lint and format | ESLint with typescript-eslint, Prettier, rustfmt, clippy |
 | Process supervision | `windows-sys` job object on Windows, process group plus a pipe watchdog on Unix |
 | Clipboard | `arboard`, write only, through a host command |
-| Save dialog | `tauri-plugin-dialog`, called from host commands only. The webview has no access to it |
+| Save and open dialogs | `tauri-plugin-dialog`, called from host commands only: saving an export and choosing a path in Settings. The webview has no access to it |
 | Links | `tauri-plugin-opener`, called from one host command that holds a fixed list of the app's own links, and from the dialog shown when no WebView2 runtime is found |
 | Completion | `@codemirror/autocomplete`, with a source written in this repository |
 | HTTPS client | `reqwest` with the OS TLS stack (`native-tls`) |
@@ -116,7 +119,7 @@ The layout is below. Keep it current as the code lands.
 stackql-workbench/
   src/                  webview (React)
     host/               typed wrappers over IPC, the only Tauri imports
-    lib/                pure logic with tests: results, cells, sorting, export formats, explorer tree, statement templates, completion, tabs, history, the CLI command, chat, the conversation layout, the chart block and its layout, activity, the query library, menu, theme, markdown
+    lib/                pure logic with tests: results, cells, sorting, export formats, explorer tree, statement templates, completion, tabs, history, the CLI command, chat, the conversation layout, the chart block and its layout, activity, the query library, menu, theme, markdown, the model choice
     state/              hooks that connect the host to the panes
     panes/              shell (menu bar, side menu), chat, explorer, editor, results, library, activity, settings, statusbar
     ui/                 small shared components
@@ -125,13 +128,13 @@ stackql-workbench/
       engine/           discovery, data folder, port selection, supervisor, job object, watchdog
       connection/       Connection trait, LocalConnection, safety mode, agent channel
       query/            pg wire session, statement splitting, results, explorer statements
-      agent/            MCP client, approvals, InferenceBackend trait, backends, loop, ACP client, delegated agent, what a model is told about presentation, the turn log
+      agent/            MCP client, approvals, InferenceBackend trait, backends and the models they list, loop, ACP client, delegated agent, what a model is told about presentation, the turn log
       secrets/          keychain access
       activity/         operator history, engine audit log reader
       icons/            provider icon lookup, fetch and cache
       library/          the query library's index and documents, fetch and cache
       config/           settings
-      ipc/              command and event definitions, saving an export, the app's own links
+      ipc/              command and event definitions, saving an export, choosing a path, the app's own links
       applog.rs         the app's own log
       webview_runtime.rs  the page renderer on Windows: using one shipped beside the app, and the dialog shown when there is none
     .cargo/             build flags: the C runtime linked in on Windows
@@ -329,7 +332,9 @@ Provider credentials are environment variables read by the engine. The app never
 
 - Apps launched from Finder or the Dock on macOS do not inherit shell profile exports. Do not rely on the app's own environment.
 - The host builds the child environment explicitly. Values come from the OS keychain and are injected at spawn, or from an operator-supplied dotenv file passed with `--env.file`.
-- Until the keychain store for provider credentials exists, the engine starts with the app's own environment as the base, plus the `--env.file` from settings. That works on Windows, where the app sees the user's environment variables. On macOS the env file is the dependable route.
+- Until the keychain store for provider credentials exists, the engine starts with the app's own environment as the base, plus the `--env.file` from settings. On macOS the env file is the dependable route.
+- On Windows a process keeps the environment it was started with, so a variable set with `setx` or in the system settings while the app was open used to reach the engine only after the app itself was restarted. Now every child the supervisor starts gets the app's own environment with the user's and the machine's variables, as the registry holds them at that moment, applied on top: a variable the app's environment lacks is added, and one changed or removed in the registry since the app started is changed or removed. Reload Credentials, which restarts the engine, is then enough. A value the app was started with, for example one set in a terminal for that launch, keeps winning until the registry's value changes. The registry is read with `CreateEnvironmentBlock`, which builds what a newly started process of the user would get. See `engine/environment.rs`.
+- The agent's engine session and a delegated agent keep the environment they started with, so after an engine restart the next turn opens new ones. On the API key path the conversation carries over. The Copilot CLI starts a new session and says that it does not remember the earlier messages.
 - The MCP `reload_credentials` tool re-sources `--env.file`. `stackql srv` needs a restart to pick up changes.
 - The UI shows variable names and whether they are set. Never log or display environment contents.
 
@@ -358,6 +363,8 @@ How they are built:
 - The tool calls of one reply run at the same time when the engine marks the tool as not destructive, with `destructiveHint: false`. That covers its query and discovery tools. A tool the engine marks as destructive, or one that carries no hint, runs alone and in the model's order, so what follows a change sees the change. The host takes the engine's word for this and reads nothing into the statement. Results go back to the model in the order it asked.
 - More than one approval prompt can be open at once. A prompt is shown on the tool call that sent the statement.
 - The API key is read from the keychain when a turn starts. Settings hold the backend, the model and the address, never the key.
+- Each backend keeps its own key in the keychain, so switching back to a backend does not ask for its key again. Removing the model backend deletes the key of the backend it removes.
+- The settings pane offers the models a backend's provider lists, from `agent/backends/models.rs`: Gemini's model list narrowed to the models that take `generateContent`, Anthropic's without retired models, and everything an OpenAI-compatible server lists. It is asked when the pane opens on a backend whose key is stored, or on a server of the operator's own that needs no key, and otherwise on List models. A key typed and not saved yet is sent with that request and kept nowhere. When the list cannot be read, the model stays a field to type in, with the provider's message under it.
 - Every backend reports what a call used in the same three counts: the whole input, the part of it read from the provider's cache, and the output, with the model's thinking where the provider counts it. The host adds them up over the calls of a turn. A count a provider does not send stays unknown and is not turned into zero.
 - A model is told how its work is shown, and how to ask for a chart, by one text in `agent/guidance.rs`. The host's loop puts it in the system prompt ahead of the engine's guidance. A delegated agent gets it with the first message. It is about presentation only, which is this app's to say because drawing is this app's capability. It says nothing about how a result is to be read. A test holds it to that.
 
@@ -400,6 +407,8 @@ A few fixed points for the interface.
 - Entries are grouped by use case, which is the first of the entry's own tags that names one. By default only entries whose providers are all installed are listed.
 - Under an empty conversation one suggestion asks about metadata and the others come from library entries that can run here: stable, not a mutation, and for installed providers. With none, the earlier fixed suggestions are shown.
 - Saved queries are plain `.iql` files on disk, not an app database.
+- Every path in Settings can be typed or chosen with Browse, which opens the system's own file or folder dialog through a host command. The webview names what the path is for, and the host decides the kind of dialog, its title and the file types it offers first. A chosen path goes into the field like typed text and is saved with the rest.
+- A save button that is not available says why beside it, for example that an API key is needed. A reason given only on hover was missed.
 - Layout: a menu bar with File, Edit, View, Query, Providers and Help, a side menu, one main view at a time, and the status bar. The views are chat, the explorer with the editor and results, the query library, and activity. Settings is a dialog. Chat is the view the app opens in.
 - The menus are drawn in the webview, not by the OS, so they are the same on both platforms and can be tested like the rest of the page. They repeat what the side menu and the panes offer.
 - Every view stays mounted while another is shown, so the editor keeps its text and history and a running turn keeps its place.

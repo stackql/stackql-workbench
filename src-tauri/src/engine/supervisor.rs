@@ -50,9 +50,11 @@ pub enum StdioMode {
 /// never left to chance.
 #[derive(Debug, Clone, Default)]
 pub struct EnvSpec {
-    /// Start from the app's own environment. On macOS an app launched from
-    /// Finder has almost nothing in it, so this must not be relied on for
-    /// credentials.
+    /// Start from the app's own environment, with the user's and the
+    /// machine's variables as Windows holds them now applied, so one set
+    /// after the app started is passed on. See `environment`. On macOS an
+    /// app launched from Finder has almost nothing in it, so this must not
+    /// be relied on for credentials there.
     pub inherit: bool,
     /// Variables set on top. Values are never logged.
     pub vars: Vec<(String, String)>,
@@ -106,8 +108,9 @@ impl Supervisor {
                 cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
             }
         }
-        if !spec.env.inherit {
-            cmd.env_clear();
+        cmd.env_clear();
+        if spec.env.inherit {
+            cmd.envs(super::environment::for_child());
         }
         cmd.envs(spec.env.vars.iter().map(|(k, v)| (k, v)));
         super::hide_console_window(&mut cmd);

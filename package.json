@@ -1,7 +1,7 @@
 {
   "name": "stackql-workbench",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop query IDE and chat interface for StackQL",
   "license": "MIT",
   "type": "module",

@@ -81,7 +81,7 @@ impl InferenceBackend for OpenAiCompatible {
     }
 }
 
-fn error_message(body: &Value) -> Option<String> {
+pub(super) fn error_message(body: &Value) -> Option<String> {
     let error = body.get("error")?;
     // Some compatible servers send the error as a bare string.
     if let Some(text) = error.as_str() {

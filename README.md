@@ -17,7 +17,7 @@ The planned capabilities are listed below.
 - Chat: the view the app opens in. It needs a model backend, and asks for one the first time a message is sent
 - Answers with results: a turn is shown as its answer, with the result set as a table that sorts and downloads, and as a chart when one is asked for
 - Approvals and activity: mutations proposed by a model wait for the operator, and every agent action is logged
-- Settings: engine path, credentials profile, safety mode, inference backend
+- Settings: engine path, credentials profile, safety mode, inference backend. Every path can be typed or chosen in the system's file dialog
 
 ## Architecture
 
@@ -258,14 +258,14 @@ When that folder is there the app uses it and does not look at what the system h
 
 An installed app keeps the engine's provider cache in `.stackql` in your home folder. That is where the `stackql` command keeps it when it is started there, as the command shell the MSI installs does, so providers you pulled with the command are there in the app, and the other way round. A build from this repository keeps a `.stackql` folder beside its executable instead, so a first run of one lists no providers. Run `REGISTRY PULL github;` in the editor to install one. To use another folder, set it under Settings.
 
-Provider credentials are environment variables the engine reads. On Windows the engine sees the variables of your user account. To use a dotenv file, set it under Settings.
+Provider credentials are environment variables the engine reads. On Windows the engine sees the variables of your user account and of the machine. One set while the app is open, with `setx` or in the system settings, is used after Providers > Reload Credentials, which restarts the engine. The app does not need to be closed. To use a dotenv file, set it under Settings.
 
 The app opens in chat. The side menu leads to the explorer, which holds the provider tree, the query editor and the results grid, to the query library, and to the activity list. The File, Edit, View, Query, Providers and Help menus repeat those.
 
 Chat needs a model backend. The first time you send a message without one, the model backend settings open. There are two kinds.
 
 - GitHub Copilot: uses the Copilot CLI installed on this machine and the sign-in it already has. Install the CLI, run `copilot login` once, then choose GitHub Copilot. Requests count against your Copilot plan, and the settings list each model with what it costs. There is an experimental setting that lets the agent hand the parts of a request that spans several providers to subagents. It is off by default.
-- An API key for Gemini, Anthropic, or an OpenAI-compatible server, which covers local inference. The key goes to the operating system keychain.
+- An API key for Gemini, Anthropic, or an OpenAI-compatible server, which covers local inference. The key goes to the operating system keychain, and each backend keeps its own. List models asks the provider which models the key can use, and the model is then chosen from that list. With a key already stored the list is read when the settings open.
 
 With an API key backend, independent queries the model asks for in one step run at the same time.
 
